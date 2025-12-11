@@ -31,6 +31,7 @@
 #define MAX40109_REG_PGA_TEMP_GAIN          0x0E
 #define MAX40109_REG_CALIBRATED_PRESSURE    0x0F
 #define MAX40109_REG_CALIBRATED_TEMP        0x11
+#define MAX40109_REG_SENSOR_OFFSET        0x14
 
 /* Status Register & Interrupt Enable Bits (Page 7 & 24) */
 #define MAX_STATUS_OV_INP_POS    (1 << 0) // Input Positive Over Voltage

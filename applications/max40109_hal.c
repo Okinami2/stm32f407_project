@@ -15,7 +15,7 @@
 #include <rtdevice.h>
 #include "board.h"
 
-#define DBG_TAG "max40109"
+#define DBG_TAG "max40109.hal"
 #define DBG_LVL DBG_INFO
 #include <rtdbg.h>
 

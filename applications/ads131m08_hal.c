@@ -4,7 +4,7 @@
 #include "ads131m08_hal.h"
 
 #include "drv_spi.h"
-#define DBG_TAG "ads131m08"
+#define DBG_TAG "ads131m08.hal"
 #define DBG_LVL DBG_LOG
 #include <rtdbg.h>
 
@@ -46,7 +46,7 @@ rt_bool_t adcRegisterWrite(rt_uint8_t addr, rt_uint16_t data,rt_uint8_t word_len
     rt_uint8_t rx_buffer[ADC_FRAME_WORD_COUNT * 4] = {0}; // 用于接收响应
     rt_uint8_t count = 3;
 
-    // 1. 构造 16 位的 WREG 命令字
+    // 构造 16 位的 WREG 命令字
     // 格式: 011a aaaa a000 0000  (因为我们只写入1个寄存器, nnnnnn = 0)
     command_word = (0b011 << 13) | ((addr & 0x3F) << 7)|0x00;
 
@@ -68,13 +68,13 @@ rt_bool_t adcRegisterWrite(rt_uint8_t addr, rt_uint16_t data,rt_uint8_t word_len
     tx_buffer[count] = (data >> 8) & 0xFF;         // 数据高字节
     tx_buffer[count + 1] = data & 0xFF;            // 数据低字节
 
-    // 3. 执行 SPI 传输
+    //执行 SPI 传输
     if (rt_spi_transfer(spi_dev, tx_buffer, rx_buffer, ADC_FRAME_WORD_COUNT * count) != ADC_FRAME_WORD_COUNT * count) {
         LOG_E("SPI write transfer to reg 0x%02X failed!", addr);
         return RT_FALSE;
     }
     /*
-    // (可选) 4. 验证芯片的响应，实际不用，否则切换字宽时会出错
+    //验证芯片的响应，实际不用，否则切换字宽时会出错
     if (rt_spi_transfer(spi_dev, tx_buffer, rx_buffer, ADC_FRAME_WORD_COUNT * count) != ADC_FRAME_WORD_COUNT * count) {
             LOG_E("SPI write transfer to reg 0x%02X failed!", addr);
             return RT_FALSE;
@@ -132,7 +132,6 @@ rt_bool_t adcRegisterRead(rt_uint8_t addr, rt_uint16_t *data,rt_uint8_t word_len
         LOG_E("SPI read transfer to reg 0x%02X failed!", addr);
         return RT_FALSE;
     }
-    //读两遍，第二遍才返回上一次的响应
     rt_memset(tx_buffer, 0, sizeof(tx_buffer));
     if (rt_spi_transfer(spi_dev, tx_buffer, rx_buffer, ADC_FRAME_WORD_COUNT * count) != ADC_FRAME_WORD_COUNT * count) {
             LOG_E("SPI read transfer to reg 0x%02X failed!", addr);

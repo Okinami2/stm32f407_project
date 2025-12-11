@@ -22,7 +22,6 @@
 #include "adc_send_thread.h"
 #include "max40109_hal.h"
 #include "time_service.h"
-#include "gnss_thread.h"
 
 #define DBG_TAG "main"
 #define DBG_LVL DBG_LOG
@@ -72,6 +71,7 @@ int main(void)
         rt_kprintf("fail start config_thread\n");
     }
 
+    /* */
     if(max_app_init() != RT_EOK){
         rt_kprintf("fail max_app_init\n");
     }
@@ -88,26 +88,20 @@ int main(void)
         rt_kprintf("fail start sdnand_init_mount\n");
     }
 
-    if(gnss_service_init() != RT_EOK){
-        rt_kprintf("fail start gnss_service_init\n");
-    }
 
     //struct timeval sys_time;
-    sys_calendar_time_t sys_cal;
+    //sys_calendar_time_t sys_cal;
     while (count++)
     {
         //ts_get_time(&sys_time);
+        /*
         ts_get_calendar_time(&sys_cal);
         rt_kprintf("cur_time: %04d-%02d-%02d %02d:%02d:%02d.%06lu UTC\n",
                            sys_cal.year, sys_cal.month, sys_cal.day,
                            sys_cal.hour, sys_cal.minute, sys_cal.second,
                            sys_cal.microsecond);
-        //rt_kprintf("cur_time  sec= %d usec=%d \n",sys_time.tv_sec,sys_time.tv_usec);
-        //time_t cur_time = ntp_get_time(RT_NULL);
-        //float pressure = 0.0;
-        //max40109_read_pressure(0,&pressure);
-        //rt_kprintf("cur_time  = %d \n",cur_time);
-        rt_thread_mdelay(1000);
+        */
+        rt_thread_mdelay(3000);
 
     }
     return RT_EOK;

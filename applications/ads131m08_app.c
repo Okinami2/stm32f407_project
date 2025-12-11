@@ -5,7 +5,7 @@
 
 #include "ads131m08_app.h"
 
-#define DBG_TAG "ads131m08"
+#define DBG_TAG "ads131m08.app"
 #define DBG_LVL DBG_LOG
 #include <rtdbg.h>
 

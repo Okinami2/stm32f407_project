@@ -10,7 +10,6 @@ Src/stm32f4xx_hal_msp.c
 Src/main.c
 Src/spi.c
 Src/gpio.c
-Src/eth.c
 Src/usart.c
 Src/i2c.c
 Src/tim.c

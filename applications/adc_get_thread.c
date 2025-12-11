@@ -6,6 +6,7 @@
  * Change Logs:
  * Date           Author       Notes
  * 2025-11-19     GreatMagicianGarfiel       the first version
+ *
  */
 #include <math.h>
 #include <rtthread.h>
@@ -13,7 +14,7 @@
 #include <board.h>
 #include "adc_get_thread.h"
 
-#define DBG_TAG "adc_get_thread"
+#define DBG_TAG "adc.get"
 #define DBG_LVL DBG_LOG
 #include <rtdbg.h>
 
@@ -25,7 +26,7 @@
 rt_int32_t adc_data_buffer[ADC_NUM_CHANNELS];
 
 uint16_t batch_index = 0;
-utc utc_time;
+sys_calendar_time_t sys_time;
 ADC_Receive_Buffer adc_receive_buffer;
 bool receive_buff_flag = false;
 rt_sem_t adc_get_done_sem = RT_NULL;
@@ -49,11 +50,16 @@ static void adc_get_thread_entry(void *parameter)
     while (1)
     {
         rt_int32_t mq_timeout;
+        rt_uint8_t adc_enabled;
 
-        if (app_config.adc_enable_channel > 0) {
-            mq_timeout = 0; // 运行模式：非阻塞查询消息
+        rt_enter_critical();
+        adc_enabled = app_config.adc_enable_channel;
+        rt_exit_critical();
+
+        if (adc_enabled > 0) {
+            mq_timeout = rt_tick_from_millisecond(10);
         } else {
-            mq_timeout = RT_WAITING_FOREVER; // 待机模式：阻塞等待消息，释放CPU
+            mq_timeout = RT_WAITING_FOREVER;
         }
 
         config_update_msg_t msg;
@@ -90,19 +96,19 @@ static void adc_get_thread_entry(void *parameter)
                 }
             }
 
-        if (app_config.adc_enable_channel > 0)
+        if (adc_enabled > 0)
         {
-            if (rt_sem_take(tim3_sem, RT_WAITING_FOREVER && app_config.adc_enable_channel > 0) == RT_EOK){
+            if (rt_sem_take(tim3_sem, RT_WAITING_FOREVER) == RT_EOK){
                 if (rt_sem_take(drdy_sem, rt_tick_from_millisecond(5)) == RT_EOK)
                 {
-                    // rt_device_read(tim2_dev, 0, &timeout_s, sizeof(timeout_s));
-                    // utc_time.microsecond = timeout_s.usec / 1000;
-                    // adc_receive_buffer.time.year = utc_time.year;
-                    // adc_receive_buffer.time.month = utc_time.month;
-                    // adc_receive_buffer.time.day = utc_time.day;
-                    // adc_receive_buffer.time.hour = utc_time.hour;
-                    // adc_receive_buffer.time.second = utc_time.second;
-                    // adc_receive_buffer.time.microsecond = timeout_s.usec / 1000;
+                    ts_get_calendar_time(&sys_time);
+                    adc_receive_buffer.time[batch_index].year = sys_time.year;
+                    adc_receive_buffer.time[batch_index].month = sys_time.month;
+                    adc_receive_buffer.time[batch_index].day = sys_time.day;
+                    adc_receive_buffer.time[batch_index].hour = sys_time.hour;
+                    adc_receive_buffer.time[batch_index].minute = sys_time.minute;
+                    adc_receive_buffer.time[batch_index].second = sys_time.second;
+                    adc_receive_buffer.time[batch_index].microsecond = sys_time.microsecond;
                     if (ads131m08_read_data_frame(adc_data_buffer, RT_FALSE) == RT_EOK)
                     {
                         rt_int32_t *p_src_data; // 定义源数据指针
@@ -220,7 +226,7 @@ int adc_get_thread_start(void)
         /* 启用DRDY引脚中断 */
         rt_pin_irq_enable(BSP_nADC_DRDY_PIN, PIN_IRQ_ENABLE);
 
-        rt_kprintf("[ADC-APP] ADC sampling system initialized successfully.\n");
+        LOG_I("[ADC-APP] ADC sampling system initialized successfully.\n");
 
         return RT_EOK;
 }
