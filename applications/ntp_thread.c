@@ -9,6 +9,7 @@
  */
 
 #include <rtthread.h>
+#include <inttypes.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <sys/time.h>
@@ -25,7 +26,7 @@
 #define NTP_ITERATIONS      8
 #define NTP_INTERVAL_MS     100
 #define NTP_TIMEOUT_MS      2000
-#define DEFAULT_SYNC_INTERVAL_MINUTES 60
+#define DEFAULT_SYNC_INTERVAL_MINUTES 30
 
 typedef struct __attribute__((packed)) {
     uint8_t  li_vn_mode;
@@ -64,7 +65,7 @@ static int ntp_request(int sock, struct sockaddr_in *addr,
 
     Timestamp_t ts;
     ts_get_time(&ts);
-    t1 = ts.usec;
+    t1 = (int64_t)ts.sec * 1000000LL + (int64_t)ts.usec;
 
     ret = sendto(sock, &pkt, sizeof(pkt), 0,
                      (struct sockaddr *)addr, sizeof(*addr));
@@ -77,7 +78,7 @@ static int ntp_request(int sock, struct sockaddr_in *addr,
             return -1;
 
     ts_get_time(&ts);
-    t4 = ts.usec;
+    t4 = (int64_t)ts.sec * 1000000LL + (int64_t)ts.usec;
 
     t2 = ntp_to_us(ntohl(pkt.recv_ts_sec), ntohl(pkt.recv_ts_frac));
     t3 = ntp_to_us(ntohl(pkt.trans_ts_sec), ntohl(pkt.trans_ts_frac));
@@ -133,8 +134,6 @@ int ntp_sync(void)
     {
         if (ntp_request(sock, &addr, &samples[valid][0], &samples[valid][1]) == 0)
         {
-            rt_kprintf("NTP[%d]: offset=%d us, delay=%d us\n",
-                       i + 1, samples[valid][0], samples[valid][1]);
             valid++;
         }
         if (i < NTP_ITERATIONS - 1)
@@ -157,34 +156,30 @@ int ntp_sync(void)
         avg_offset += samples[i][0];
     avg_offset /= use_count;
 
-    int32_t sec = avg_offset / 1000000LL;
-    int32_t usec = avg_offset % 1000000LL;
+    int32_t off_sec  = (int32_t)(avg_offset / 1000000LL);
+    int32_t off_usec = (int32_t)(avg_offset % 1000000LL);
+    if (off_usec < 0) { off_sec -= 1; off_usec += 1000000; }
 
-    if (avg_offset < 0 && usec != 0)
-    {
-        sec -= 1;
-        usec += 1000000;
-    }
+    rt_kprintf("NTP: final offset = %lld us (delay=%lld us)\n",
+               (long long)avg_offset, (long long)samples[0][1]);
 
-    rt_kprintf("NTP: final offset = %d.%06d s (delay=%d us)\n",
-               sec, usec < 0 ? -usec : usec, samples[0][1]);
-
-    ts_correct_time_by_ntp(sec, usec);
+    ts_correct_time_by_ntp_offset_us(avg_offset);
 
     return 0;
 }
 
 static void ntp_sync_thread_entry(void *parameter)
 {
-
+    rt_thread_mdelay(10000);
 
     while (1)
     {
         if(ntp_sync() != 0){
             rt_kprintf("ntp sync failed. please check the network.\n");
         }
-        //rt_tick_t delay_tick = DEFAULT_SYNC_INTERVAL_MINUTES * 60 * RT_TICK_PER_SECOND;
-        rt_tick_t delay_tick = RT_TICK_PER_SECOND * 10;
+        rt_tick_t delay_tick = DEFAULT_SYNC_INTERVAL_MINUTES * 60 * RT_TICK_PER_SECOND;
+        //rt_tick_t delay_tick = RT_TICK_PER_SECOND * 30;
+
         rt_thread_delay(delay_tick);
     }
 }
@@ -212,4 +207,4 @@ static int ntp_thread_init(void)
 
     return RT_EOK;
 }
-//INIT_APP_EXPORT(ntp_thread_init);
+INIT_APP_EXPORT(ntp_thread_init);

@@ -22,6 +22,7 @@
 #include "adc_send_thread.h"
 #include "max40109_hal.h"
 #include "time_service.h"
+#include "sd_spi_switch.h"
 
 #define DBG_TAG "main"
 #define DBG_LVL DBG_LOG
@@ -71,10 +72,10 @@ int main(void)
         rt_kprintf("fail start config_thread\n");
     }
 
-    /* */
+    /*
     if(max_app_init() != RT_EOK){
         rt_kprintf("fail max_app_init\n");
-    }
+    }*/
 
     if(adc_get_thread_start() != RT_EOK){
         rt_kprintf("fail start adc_get_thread\n");

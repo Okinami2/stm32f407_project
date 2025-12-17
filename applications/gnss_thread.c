@@ -10,6 +10,8 @@
 #include <rtthread.h>
 #include <rtdevice.h>
 #include "time_service.h"
+#include "sd_spi_switch.h"
+
 #define GNSS_UART_NAME       "uart5"
 
 static rt_sem_t rx_sem = RT_NULL;
@@ -164,9 +166,9 @@ static void gnss_thread_entry(void *parameter)
 
                         if (parse_rmc_time(line_buffer, &gps_utc) == 0)
                         {
+                            //rt_kprintf("timestamp for nmea: %d \n",gps_utc);
                             ts_correct_time_by_nmea(gps_utc);
-
-                            rt_kprintf("[GNSS] Sync OK: %d \n", gps_utc);
+                            //rt_kprintf("[GNSS] Sync OK: %d \n", gps_utc);
                         }
                         else
                         {
@@ -183,6 +185,11 @@ static void gnss_thread_entry(void *parameter)
 
 int gnss_service_init(void)
 {
+    rt_pin_write(BSP_GNSSPWR_EN_PIN,PIN_HIGH);
+    rt_pin_write(BSP_GNSS_SW_PIN,PIN_HIGH);
+
+    ts_spi_bus_release();
+
     serial_dev = rt_device_find(GNSS_UART_NAME);
     if (!serial_dev)
     {
@@ -192,7 +199,7 @@ int gnss_service_init(void)
 
     rx_sem = rt_sem_create("gnss_sem", 0, RT_IPC_FLAG_FIFO);
 
-    rt_device_open(serial_dev, RT_DEVICE_FLAG_DMA_RX | RT_DEVICE_FLAG_INT_RX);
+    rt_device_open(serial_dev, RT_DEVICE_FLAG_DMA_RX);
 
     rt_device_set_rx_indicate(serial_dev, uart_input_callback);
 
@@ -210,4 +217,4 @@ int gnss_service_init(void)
 
     return RT_EOK;
 }
-//INIT_APP_EXPORT(gnss_service_init);
+INIT_APP_EXPORT(gnss_service_init);

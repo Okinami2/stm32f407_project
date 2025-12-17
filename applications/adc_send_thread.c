@@ -24,7 +24,7 @@
 #define TX_THREAD_STACK  2048
 
 
-#define SERVER_IP        "192.168.149.1"  // 修改为你的服务器IP
+#define SERVER_IP        "192.168.137.1"  // 修改为你的服务器IP
 #define SERVER_PORT      9001              // 修改为你的服务器端口
 
 // 为了使用 DMA，数据必须在内存中连续
@@ -153,7 +153,7 @@ static void send_to_server_thread_entry(void *parameter)
                 packet_count++;
 
                 // 每发送 100 个包打印一次统计信息
-                if (packet_count % 100 == 0)
+                if (packet_count % 5 == 0)
                 {
                     rt_kprintf("[ADC Send] Sent %u packets, %u errors, last size: %u bytes\n",
                             packet_count, error_count, packet_len);

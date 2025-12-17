@@ -14,7 +14,7 @@
  */
 
 #include <drivers/spi.h>
-#include "time_service.h"
+#include "sd_spi_switch.h"
 
 #define DBG_TAG    "spi.core"
 #define DBG_LVL    DBG_INFO

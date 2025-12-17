@@ -16,7 +16,7 @@
 #include "time_service.h"
 
 
-#define BATCH_SIZE 256
+#define BATCH_SIZE 32
 
 typedef struct {
     float ad0[BATCH_SIZE * 2];

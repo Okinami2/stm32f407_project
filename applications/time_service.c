@@ -13,7 +13,6 @@
 #include <stdlib.h>
 
 extern UART_HandleTypeDef huart5;
-extern SPI_HandleTypeDef hspi3;
 extern TIM_HandleTypeDef htim2;
 
 typedef struct
@@ -43,61 +42,10 @@ static ts_ctrl_t g_ts = {
     .ref_source = TS_REF_NONE
 };
 
-typedef enum { MODE_SAFE_HIZ, MODE_GNSS, MODE_SD_SPI } mux_mode_t;
-
-
 static void _spll_update(uint32_t delta_ticks) {
     const double alpha = 0.1;
     g_ts.ticks_per_sec = (1.0 - alpha) * g_ts.ticks_per_sec + alpha * (double)delta_ticks;
 }
-
-static void _set_mux_mode(mux_mode_t mode) {
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-
-    if (mode == MODE_SAFE_HIZ) {
-        GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-        GPIO_InitStruct.Pull = GPIO_NOPULL;
-        GPIO_InitStruct.Pin = GPIO_PIN_12;
-        HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-        GPIO_InitStruct.Pin = GPIO_PIN_2;
-        HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
-    } else if (mode == MODE_GNSS) {
-        rt_pin_write(BSP_GNSS_SW_PIN, PIN_HIGH);
-        // PC12 -> UART5_TX
-        GPIO_InitStruct.Pin = GPIO_PIN_12;
-        GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-        GPIO_InitStruct.Pull = GPIO_PULLUP;
-        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-        GPIO_InitStruct.Alternate = GPIO_AF8_UART5;
-        HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-        // PD2 -> UART5_RX
-        GPIO_InitStruct.Pin = GPIO_PIN_2;
-        HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
-
-        __HAL_UART_CLEAR_PEFLAG(&huart5);
-        __HAL_UART_CLEAR_FEFLAG(&huart5);
-        __HAL_UART_CLEAR_NEFLAG(&huart5);
-        __HAL_UART_CLEAR_OREFLAG(&huart5);
-        __HAL_UART_ENABLE_IT(&huart5, UART_IT_RXNE);
-    } else if (mode == MODE_SD_SPI) {
-        rt_pin_write(BSP_GNSS_SW_PIN, PIN_LOW);
-        // PC12 -> SPI3_MOSI
-        GPIO_InitStruct.Pin = GPIO_PIN_12;
-        GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-        GPIO_InitStruct.Pull = GPIO_NOPULL;
-        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-        GPIO_InitStruct.Alternate = GPIO_AF6_SPI3;
-        HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-        // PD2 -> GPIO Output (CS)
-        GPIO_InitStruct.Pin = GPIO_PIN_2;
-        GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-        GPIO_InitStruct.Pull = GPIO_NOPULL;
-        GPIO_InitStruct.Alternate = 0;
-        HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
-        HAL_GPIO_WritePin(GPIOD, GPIO_PIN_2, GPIO_PIN_SET);
-    }
-}
-
 
 
 static void _update_pps_state_by_timeout(void *parameter)
@@ -108,15 +56,13 @@ static void _update_pps_state_by_timeout(void *parameter)
 
     switch (g_ts.pps_state) {
     case PPS_STATE_ACQUIRING:
-        /* 捕获超时 -> 自由运行 */
-        if (elapsed_ms > 3000) {  /* 3秒无PPS */
+        if (elapsed_ms > 30000) {  /* 30秒无PPS */
             g_ts.pps_state = PPS_STATE_FREERUN;
             g_ts.pps_valid_cnt = 0;
         }
         break;
 
     case PPS_STATE_LOCKED:
-        /* 锁定状态下PPS丢失 -> 保持 */
         if (elapsed_ms > 1500) {  /* 1.5秒无PPS */
             g_ts.pps_state = PPS_STATE_HOLDOVER;
             g_ts.pps_valid_cnt = 0;
@@ -124,10 +70,8 @@ static void _update_pps_state_by_timeout(void *parameter)
         break;
 
     case PPS_STATE_HOLDOVER:
-        /* 保持超时 -> 自由运行 */
-        if (elapsed_ms > 60000) {  /* 60秒无有效PPS */
+        if (elapsed_ms > 180000) {  /* 180秒无有效PPS */
             g_ts.pps_state = PPS_STATE_FREERUN;
-            g_ts.ref_source = TS_REF_NONE;  /* 清除参考源 */
         }
         break;
 
@@ -144,15 +88,15 @@ static void _update_pps_state_by_timeout(void *parameter)
 static int _pps_timer_init(void)
 {
     if (s_pps_timeout_timer != RT_NULL) {
-        return 0;  /* 已初始化 */
+        return 0;
     }
 
     s_pps_timeout_timer = rt_timer_create(
-        "pps_tmr",                              /* 定时器名称 */
-        _update_pps_state_by_timeout,           /* 回调函数 */
-        RT_NULL,                                /* 回调参数 */
-        rt_tick_from_millisecond(1000),         /* 周期1秒 */
-        RT_TIMER_FLAG_PERIODIC | RT_TIMER_FLAG_SOFT_TIMER  /* 周期+软件定时器 */
+        "pps_tmr",
+        _update_pps_state_by_timeout,
+        RT_NULL,
+        rt_tick_from_millisecond(1000),
+        RT_TIMER_FLAG_PERIODIC | RT_TIMER_FLAG_SOFT_TIMER
     );
 
     if (s_pps_timeout_timer == RT_NULL) {
@@ -187,12 +131,9 @@ static void _pps_timer_deinit(void)
 
 void ts_pps_irq_handler(void *args)
 {
-    (void)args;
-
     uint32_t now_hw = TS_HW_TIMER->CNT;
     rt_tick_t now_sw = rt_tick_get();
 
-    /* 计算与上次PPS的间隔tick数 */
     uint32_t delta_hw;
     if (now_hw >= g_ts.last_pps_hw_tick) {
         delta_hw = now_hw - g_ts.last_pps_hw_tick;
@@ -205,121 +146,79 @@ void ts_pps_irq_handler(void *args)
     int is_valid_pulse = (delta_hw > (uint32_t)(nominal * 0.9)) &&
                          (delta_hw < (uint32_t)(nominal * 1.1));
 
-    /* 更新硬件时间戳（无论有效与否都更新，用于下次计算） */
     g_ts.last_pps_hw_tick = now_hw;
     g_ts.last_pps_sw_tick = now_sw;
 
-    /* 状态机处理 */
     switch (g_ts.pps_state) {
 
         case PPS_STATE_INIT:
-            /* 初始状态：需要有时间参考源才能开始捕获 */
+            g_ts.pps_valid_cnt = 0;
+            g_ts.ticks_per_sec = TS_TICKS_PER_SEC_NOMINAL;
             if (g_ts.ref_source != TS_REF_NONE) {
                 g_ts.pps_state = PPS_STATE_ACQUIRING;
-                g_ts.pps_valid_cnt = 0;
-                g_ts.ticks_per_sec = TS_TICKS_PER_SEC_NOMINAL;
             }
-            /* 无参考源则保持INIT，不递增秒数 */
             break;
 
         case PPS_STATE_ACQUIRING:
-            /* 捕获状态：验证PPS信号稳定性 */
             if (is_valid_pulse) {
-                uint32_t diff_abs = (delta_hw > nominal) ?
-                                    (delta_hw - nominal) : (nominal - delta_hw);
-
-                if (diff_abs < PPS_VALID_TOLERANCE_US) {
                     g_ts.pps_valid_cnt++;
-                    _spll_update(delta_hw);  /* 开始训练SPLL */
 
                     if (g_ts.pps_valid_cnt >= PPS_ACQ_VALID_COUNT) {
                         g_ts.pps_state = PPS_STATE_LOCKED;
                     }
-                } else {
-                    /* 偏差过大，重新计数 */
-                    g_ts.pps_valid_cnt = 0;
-                }
             } else {
-                /* 无效脉冲，重新计数 */
                 g_ts.pps_valid_cnt = 0;
             }
 
-            /* ACQUIRING状态下也递增秒数（已有参考源） */
-            if (g_ts.ref_source != TS_REF_NONE) {
-                g_ts.base_utc_sec++;
-            }
             break;
 
         case PPS_STATE_LOCKED:
-            /* 锁定状态：正常运行 */
             if (is_valid_pulse) {
                 _spll_update(delta_hw);
                 g_ts.base_utc_sec++;
             } else {
-                /* PPS异常，进入保持模式 */
                 g_ts.pps_state = PPS_STATE_HOLDOVER;
-                g_ts.pps_valid_cnt = 0;
-                /* 仍然递增秒数，使用上次的ticks_per_sec */
-                g_ts.base_utc_sec++;
             }
             break;
 
         case PPS_STATE_HOLDOVER:
-            /* 保持状态：等待PPS恢复 */
             if (is_valid_pulse) {
-                g_ts.pps_valid_cnt++;
-                _spll_update(delta_hw);
-
-                /* 需要连续几个有效PPS才能恢复LOCKED */
-                if (g_ts.pps_valid_cnt >= 2) {
-                    g_ts.pps_state = PPS_STATE_LOCKED;
-                }
-            } else {
-                g_ts.pps_valid_cnt = 0;
+                g_ts.pps_state = PPS_STATE_LOCKED;
+                g_ts.base_utc_sec++;// 仅在locked状态下自增，然后使用nmea中的定时信息来对表
             }
-            /* 保持模式仍递增秒数 */
-            g_ts.base_utc_sec++;
+
             break;
 
         case PPS_STATE_FREERUN:
-            /* 自由运行状态：时间不可信，等待重新同步 */
             if (is_valid_pulse && g_ts.ref_source != TS_REF_NONE) {
-                /* 有有效PPS且有参考源，重新开始捕获 */
                 g_ts.pps_state = PPS_STATE_ACQUIRING;
                 g_ts.pps_valid_cnt = 1;
-                g_ts.ticks_per_sec = TS_TICKS_PER_SEC_NOMINAL;
             }
-            /* FREERUN状态下仍递增秒数（但不可信） */
-            g_ts.base_utc_sec++;
             break;
 
         default:
-            /* 异常状态恢复 */
             g_ts.pps_state = PPS_STATE_INIT;
             break;
     }
 }
 
-void ts_get_time(Timestamp_t *ts) {
+void ts_get_time(Timestamp_t *ts)
+{
     rt_base_t level = rt_hw_interrupt_disable();
 
     uint32_t now_hw = TS_HW_TIMER->CNT;
-    uint32_t delta_hw = 0;
+
+    uint32_t delta_hw;
     if (now_hw >= g_ts.last_pps_hw_tick) {
-            delta_hw = now_hw - g_ts.last_pps_hw_tick;
-        } else {
-            delta_hw = (0xFFFFFFFF - g_ts.last_pps_hw_tick) + now_hw + 1;
-        }
-
-    uint32_t usec_offset = (uint32_t)((double)delta_hw * 1000000.0 / g_ts.ticks_per_sec);
-
-    ts->sec = g_ts.base_utc_sec;
-
-    if (usec_offset >= 1000000) {
-        ts->sec += usec_offset / 1000000;
-        usec_offset %= 1000000;
+        delta_hw = now_hw - g_ts.last_pps_hw_tick;
+    } else {
+        delta_hw = (0xFFFFFFFF - g_ts.last_pps_hw_tick) + now_hw + 1;
     }
-    ts->usec = usec_offset;
+
+    uint64_t elapsed_us = (uint64_t)((double)delta_hw * 1000000.0 / g_ts.ticks_per_sec);
+
+    ts->sec  = (uint32_t)(g_ts.base_utc_sec + (time_t)(elapsed_us / 1000000ULL));
+    ts->usec = (uint32_t)(elapsed_us % 1000000ULL);
 
     rt_hw_interrupt_enable(level);
 }
@@ -345,78 +244,65 @@ void ts_get_calendar_time(sys_calendar_time_t *cal) {
 
 /* NMEA 校准  */
 void ts_correct_time_by_nmea(time_t utc_sec) {
+    uint32_t now_hw = TS_HW_TIMER->CNT;
+
+    if (now_hw - g_ts.last_pps_hw_tick > 1000000 * 1.2) {
+        rt_kprintf("[TS] The NMEA timestamp seems outdated: %d\n", utc_sec);
+        return;
+    }
+
     rt_base_t level = rt_hw_interrupt_disable();
 
-    if (g_ts.pps_state == PPS_STATE_LOCKED || g_ts.pps_state == PPS_STATE_ACQUIRING) {
+    time_t diff = g_ts.base_utc_sec - utc_sec;
+    time_t abs_diff = (diff < 0) ? -diff : diff;
 
-        time_t diff = g_ts.base_utc_sec - utc_sec;
-        time_t abs_diff = (diff < 0) ? -diff : diff;
-        if (abs_diff > 1) {
-            g_ts.base_utc_sec = utc_sec;
-            rt_kprintf("[TS] NMEA Corrected Base Sec: %d\n", utc_sec);
-        }
+    if (abs_diff > 1) {
+        g_ts.base_utc_sec = utc_sec;
+        rt_kprintf("[TS] NMEA Corrected Base Sec: %d\n", utc_sec);
     }
 
     if (g_ts.ref_source == TS_REF_NONE) {
         g_ts.ref_source = TS_REF_GNSS_PPS;
     }
-
     rt_hw_interrupt_enable(level);
 }
 
 /* NTP 校准  */
-void ts_correct_time_by_ntp(uint32_t ntp_sec, uint32_t ntp_usec) {
+void ts_correct_time_by_ntp_offset_us(int64_t offset_us)
+{
     Timestamp_t now;
     ts_get_time(&now);
 
-    int32_t diff_sec = (int32_t)(ntp_sec - now.sec);
-    int32_t diff_usec = (int32_t)(ntp_usec - now.usec);
-    int32_t abs_diff_usec = (diff_usec < 0) ? -diff_usec : diff_usec;
+    int64_t now_us    = (int64_t)now.sec * 1000000LL + (int64_t)now.usec;
+    int64_t target_us = now_us + offset_us;
 
-    if (diff_sec != 0 || abs_diff_usec > TS_NTP_SYNC_THRESHOLD_US) {
-        rt_base_t level = rt_hw_interrupt_disable();
+    int64_t target_sec  = target_us / 1000000LL;
+    int64_t target_usec = target_us % 1000000LL;
+    if (target_usec < 0) { target_sec -= 1; target_usec += 1000000LL; }
 
-        if (g_ts.pps_state != PPS_STATE_LOCKED && g_ts.pps_state != PPS_STATE_HOLDOVER) {
-            rt_kprintf("[TS] NTP Sync (Drift %d s, %d us). PPS State: %d\n",
-                       diff_sec, diff_usec, g_ts.pps_state);
+    int64_t abs_off_us = offset_us < 0 ? -offset_us : offset_us;
+    if (abs_off_us <= TS_NTP_SYNC_THRESHOLD_US) return;
 
-            g_ts.base_utc_sec = ntp_sec;
-            g_ts.ref_source = TS_REF_NTP;
+    rt_base_t level = rt_hw_interrupt_disable();
 
-            /* 反向计算 last_pps_hw_tick */
-            uint32_t now_tick = TS_HW_TIMER->CNT;
-            double ticks_offset = (double)diff_usec * g_ts.ticks_per_sec / 1000000.0;
+    if (g_ts.pps_state != PPS_STATE_LOCKED && g_ts.pps_state != PPS_STATE_HOLDOVER) {
+        rt_kprintf("[TS] NTP Sync (Offset %+lld us). PPS State: %d\n",
+                   (long long)offset_us, g_ts.pps_state);
 
-            /* 正确处理正负偏移 */
-            if (ticks_offset >= 0) {
-                g_ts.last_pps_hw_tick = now_tick - (uint32_t)ticks_offset;
-            } else {
-                g_ts.last_pps_hw_tick = now_tick + (uint32_t)(-ticks_offset);
-            }
+        uint32_t now_tick = TS_HW_TIMER->CNT;
+        g_ts.base_utc_sec = (uint32_t)target_sec;
+        g_ts.ref_source   = TS_REF_NTP;
 
-            g_ts.last_pps_sw_tick = rt_tick_get();
-        } else {
-            rt_kprintf("[TS] NTP Ignored: PPS Locked (Drift %d us)\n", diff_usec);
-        }
+        double ticks_back_d = (double)target_usec * g_ts.ticks_per_sec / 1000000.0;
+        uint32_t ticks_back = (uint32_t)(ticks_back_d + 0.5);
 
-        rt_hw_interrupt_enable(level);
+        g_ts.last_pps_hw_tick = now_tick - ticks_back;
+        g_ts.last_pps_sw_tick = rt_tick_get();
     }
-}
 
-void ts_spi_bus_claim(void) {
-    rt_base_t level = rt_hw_interrupt_disable();
-    __HAL_UART_DISABLE_IT(&huart5, UART_IT_RXNE);
-    _set_mux_mode(MODE_SAFE_HIZ);
-    _set_mux_mode(MODE_SD_SPI);
     rt_hw_interrupt_enable(level);
 }
 
-void ts_spi_bus_release(void) {
-    rt_base_t level = rt_hw_interrupt_disable();
-    _set_mux_mode(MODE_SAFE_HIZ);
-    _set_mux_mode(MODE_GNSS);
-    rt_hw_interrupt_enable(level);
-}
 
 int time_service_init(void) {
     rt_pin_mode(BSP_GNSS_SW_PIN, PIN_MODE_OUTPUT);
@@ -440,12 +326,11 @@ int time_service_init(void) {
         return -1;
     }
 
-    ts_spi_bus_release();
-
     rt_pin_mode(GET_PIN(G, 2),PIN_MODE_INPUT);
     rt_pin_attach_irq(GET_PIN(G, 2), PIN_IRQ_MODE_RISING, ts_pps_irq_handler, RT_NULL);
     rt_pin_irq_enable(GET_PIN(G, 2), PIN_IRQ_ENABLE);
 
     return 0;
 }
+
 INIT_APP_EXPORT(time_service_init);

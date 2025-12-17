@@ -24,6 +24,7 @@
 /* kservice optimization */
 
 #define RT_KSERVICE_USING_STDLIB
+#define RT_KPRINTF_USING_LONGLONG
 /* end of kservice optimization */
 #define RT_USING_DEBUG
 #define RT_DEBUGING_COLOR
@@ -117,7 +118,8 @@
 #define RT_SYSTEM_WORKQUEUE_PRIORITY 23
 #define RT_USING_SERIAL
 #define RT_USING_SERIAL_V1
-#define RT_SERIAL_RB_BUFSZ 256
+#define RT_SERIAL_USING_DMA
+#define RT_SERIAL_RB_BUFSZ 1024
 #define RT_USING_I2C
 #define RT_USING_I2C_BITOPS
 #define RT_USING_PHY

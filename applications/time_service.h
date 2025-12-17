@@ -15,7 +15,7 @@
 #define TS_TIMER_PRESCALER  83
 #define TS_TICKS_PER_SEC_NOMINAL 1000000.0
 
-#define TS_NTP_SYNC_THRESHOLD_US  50000
+#define TS_NTP_SYNC_THRESHOLD_US  100000
 #define PPS_VALID_TOLERANCE_US    100
 
 #define PPS_ACQ_VALID_COUNT              5       /* LOCKED 所需连续有效次数 */
@@ -50,7 +50,7 @@ typedef enum
     TS_REF_NONE = 0,
     TS_REF_GNSS_PPS,
     TS_REF_NTP,
-    TS_REF_FREERUN
+    TS_REF_NMEA
 } ts_ref_source_t;
 
 /* API */
@@ -59,10 +59,7 @@ void ts_get_time(Timestamp_t *ts);
 void ts_get_calendar_time(sys_calendar_time_t *cal);
 
 void ts_correct_time_by_nmea(time_t utc_sec);
-void ts_correct_time_by_ntp(uint32_t ntp_sec, uint32_t ntp_usec);
-
-void ts_spi_bus_claim(void);
-void ts_spi_bus_release(void);
+void ts_correct_time_by_ntp_offset_us(int64_t offset_us);
 
 
 #endif /* APPLICATIONS_TIME_SERVICE_H_ */
