@@ -12,16 +12,20 @@
 #include <rtdevice.h>
 #include <stdbool.h>
 #include <string.h>
-
+#include <dfs_posix.h>
 #include <sys/socket.h>
 #include <netdb.h>
 
 #include "adc_get_thread.h"
 #include "adc_send_thread.h"
 
-//#define SENDER_DEV_NAME  "e0"
+#define SENDER_DEV_NAME  "e0"
 #define TX_THREAD_PRIO   20
 #define TX_THREAD_STACK  2048
+
+#define STORAGE_PATH     "/adc_data.bin"
+#define RECOVERY_PRIO    23
+#define MAX_RETRY_COUNT  3
 
 
 #define SERVER_IP        "192.168.137.1"  // 修改为你的服务器IP
@@ -30,7 +34,7 @@
 // 为了使用 DMA，数据必须在内存中连续
 #define PACKET_DATA_SIZE (BATCH_SIZE * (8 * sizeof(float) + sizeof(sys_calendar_time_t)))
 
-static uint8_t dma_tx_buffer[PACKET_DATA_SIZE + 16];//留一点多余空间
+rt_align(32) static uint8_t dma_tx_buffer[PACKET_DATA_SIZE + 16];
 
 // Socket 句柄
 static int sock_fd = -1;
@@ -57,6 +61,30 @@ static int init_udp_socket(void)
                SERVER_IP, SERVER_PORT);
 
     return 0;
+}
+
+static rt_bool_t is_network_ready(void)
+{
+    struct netdev *net_dev = netdev_get_by_name(SENDER_DEV_NAME);
+    if (net_dev && netdev_is_link_up(net_dev) && netdev_is_up(net_dev))
+    {
+        return RT_TRUE;
+    }
+    return RT_FALSE;
+}
+
+static void save_packet_to_sd(uint8_t *data, uint32_t len)
+{
+    int fd = open(STORAGE_PATH, O_WRONLY | O_CREAT | O_APPEND);
+    if (fd >= 0)
+    {
+        write(fd, data, len);
+        close(fd);
+    }
+    else
+    {
+        rt_kprintf("[ADC SD] Save failed! Check SD card.\n");
+    }
 }
 
 /**
@@ -118,54 +146,70 @@ static int send_data_udp(uint8_t *data, uint32_t len)
  */
 static void send_to_server_thread_entry(void *parameter)
 {
-    //rt_err_t res;
     uint16_t start_index;
     uint32_t packet_len;
-
     int ret;
-    uint32_t packet_count = 0;
-    uint32_t error_count = 0;
 
-    rt_thread_mdelay(10000);
-    if (init_udp_socket() != 0)
-        {
-            rt_kprintf("[ADC Send] Failed to initialize UDP socket, thread exit\n");
-            return;
-        }
-    // 打开发送设备
+    rt_thread_mdelay(5000);
+    init_udp_socket();
+
     while (1)
     {
         if (rt_sem_take(adc_get_done_sem, RT_WAITING_FOREVER) == RT_EOK)
         {
-            if (receive_buff_flag == true) {
-                start_index = 0;
-            } else {
-                start_index = BATCH_SIZE;
-            }
-            // 打包
+            start_index = (receive_buff_flag == true) ? 0 : BATCH_SIZE;
             packet_len = pack_data_to_buffer(start_index);
-            rt_kprintf("---------the packet length is %d---------\n",packet_len);
-            // 发送
-            ret = send_data_udp(dma_tx_buffer, packet_len);
 
-            if (ret > 0)
+            if (is_network_ready())
             {
-                packet_count++;
+                ret = sendto(sock_fd, dma_tx_buffer, packet_len, 0,
+                        (struct sockaddr *)&server_addr, sizeof(server_addr));
 
-                // 每发送 100 个包打印一次统计信息
-                if (packet_count % 5 == 0)
+                if (ret <= 0) // 如果发送失败（例如网卡虽然up但链路故障）
                 {
-                    rt_kprintf("[ADC Send] Sent %u packets, %u errors, last size: %u bytes\n",
-                            packet_count, error_count, packet_len);
+                    save_packet_to_sd(dma_tx_buffer, packet_len);
                 }
             }
             else
             {
-                error_count++;
-                rt_kprintf("[ADC Send] Send failed! Total errors: %u\n", error_count);
+                save_packet_to_sd(dma_tx_buffer, packet_len);
             }
-
         }
+    }
+}
+
+static void recovery_thread_entry(void *parameter)
+{
+    uint8_t *read_buf = rt_malloc(PACKET_DATA_SIZE + 16);
+    if (!read_buf) return;
+
+    while (1)
+    {
+        if (is_network_ready())
+        {
+            struct stat st;
+            if (stat(STORAGE_PATH, &st) == 0 && st.st_size > 0)
+            {
+                int fd = open(STORAGE_PATH, O_RDONLY);
+                if (fd >= 0)
+                {
+                    rt_kprintf("[Recovery] Network recovered, resending history data...\n");
+
+                    while (read(fd, read_buf, PACKET_DATA_SIZE + 4) > 0)
+                    {
+                        sendto(sock_fd, read_buf, PACKET_DATA_SIZE + 4, 0,
+                               (struct sockaddr *)&server_addr, sizeof(server_addr));
+
+                        rt_thread_mdelay(10);
+                    }
+                    close(fd);
+
+                    unlink(STORAGE_PATH);
+                    rt_kprintf("[Recovery] History data sent and cleared.\n");
+                }
+            }
+        }
+        rt_thread_mdelay(2000);
     }
 }
 
@@ -174,17 +218,27 @@ static void send_to_server_thread_entry(void *parameter)
  */
 int adc_send_to_server_start(void)
 {
-    rt_thread_t tid = rt_thread_create("adc_send_to_server_start",
+
+    rt_thread_t tid1 = rt_thread_create("adc_send_to_server_start",
                                        send_to_server_thread_entry,
                                        RT_NULL,
                                        TX_THREAD_STACK,
                                        TX_THREAD_PRIO,
                                        10);
-    if (tid != RT_NULL)
+
+    rt_thread_t tid2 = rt_thread_create("adc_send_to_server_start",
+                                           send_to_server_thread_entry,
+                                           RT_NULL,
+                                           1024,
+                                           RECOVERY_PRIO,
+                                           10);
+    if (tid1 != RT_NULL && tid2 != RT_NULL)
     {
-        rt_thread_startup(tid);
+        rt_thread_startup(tid1);
+        rt_thread_startup(tid2);
         return RT_EOK;
     }
+
     return -RT_ERROR;
 }
 // 自动初始化 (可选)

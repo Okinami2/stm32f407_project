@@ -219,7 +219,6 @@
 #define LWIP_SO_LINGER 0
 #define LWIP_NETIF_LOOPBACK 0
 #define RT_LWIP_USING_PING
-#define RT_LWIP_DEBUG
 /* end of Network */
 
 /* Memory protection */

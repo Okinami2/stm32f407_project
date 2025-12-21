@@ -51,7 +51,6 @@
 
 /* Function Prototypes */
 rt_err_t max_app_init(void);
-rt_err_t max40109_read_pressure(rt_uint8_t chip_idx, float *pressure);
-rt_err_t max40109_read_temperature(rt_uint8_t chip_idx, float *temp);
+rt_err_t global_max40109_write_reg(rt_uint8_t chip_idx, rt_uint8_t reg, rt_uint16_t val);
 
 #endif/* APPLICATIONS_MAX40109_HAL_H_ */

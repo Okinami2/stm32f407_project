@@ -3,6 +3,8 @@
 #include <string.h>
 #include "config_thread.h"
 
+#include "max40109_hal.h"
+
 #include <stdlib.h>
 #if defined(RT_USING_FINSH) || defined(RT_USING_MSH)
 #include <finsh.h>
@@ -335,6 +337,38 @@ void config_print_all(void)
     rt_kprintf("-----------------------\n");
 }
 
+static rt_err_t write_max_chip(const char* id_str, const char* addr_str, const char* val_str)
+{
+    rt_uint8_t reg_addr;
+    rt_uint16_t reg_val;
+    rt_err_t res = RT_EOK;
+    reg_addr = (rt_uint8_t)strtol(addr_str, NULL, 0);
+    reg_val = (rt_uint16_t)strtol(val_str, NULL, 0);
+    if (strcmp(id_str, "all") == 0)
+    {
+        rt_kprintf("Writing 0x%04X to Reg 0x%02X on ALL chips...\n", reg_val, reg_addr);
+        for (rt_uint8_t i = 0; i < 8; i++)
+        {
+            if (global_max40109_write_reg(i, reg_addr, reg_val) != RT_EOK)
+            {
+                rt_kprintf("Chip %d: Fail\n", i);
+                res = -RT_EIO;
+            }
+        }
+    }
+    else
+    {
+        rt_uint8_t chip_idx = (rt_uint8_t)atoi(id_str);
+        if (chip_idx >= 8)
+        {
+            rt_kprintf("Invalid Chip ID: %d (0-7 or 'all')\n", chip_idx);
+            return -RT_ERROR;
+        }
+        res = global_max40109_write_reg(chip_idx, reg_addr, reg_val);
+    }
+    return res;
+}
+
 
 /**
  * @brief Entry point for the configuration thread.
@@ -363,7 +397,7 @@ static int finsh_cmd_config(int argc, char **argv)
 {
     if (argc < 2)
     {
-        rt_kprintf("usage: config list|get|set ...\n");
+        rt_kprintf("usage: config list|get|set|write_max_chip ...\n");
         return -RT_ERROR;
     }
 
@@ -397,11 +431,31 @@ static int finsh_cmd_config(int argc, char **argv)
         }
         return RT_EOK;
     }
+    else if (strcmp(argv[1], "write_max_chip") == 0)
+    {
+        //config write_max_chip <id> <reg> <value>
+        if (argc != 5)
+        {
+            rt_kprintf("Usage: config write_max_chip <id(0-7|all)> <reg> <value>\n");
+            rt_kprintf("E.g. : config write_max_chip 0 0x0E 0x0200\n");
+            rt_kprintf("       config write_max_chip all 0x14 0x0001\n");
+            return -RT_ERROR;
+        }
+        if (write_max_chip(argv[2], argv[3], argv[4]) == RT_EOK)
+        {
+            rt_kprintf("Write successful: Chip[%s] Reg[%s] = Value[%s]\n", argv[2], argv[3], argv[4]);
+        }
+        else
+        {
+            rt_kprintf("Write FAILED: Chip[%s] Reg[%s]\n", argv[2], argv[3]);
+        }
+        return RT_EOK;
+    }
     rt_kprintf("unknown subcommand\n");
     return -RT_ERROR;
 }
 
-MSH_CMD_EXPORT_ALIAS(finsh_cmd_config, config, configuration manager: config list|get|set name value);
+MSH_CMD_EXPORT_ALIAS(finsh_cmd_config, config, configuration manager: config list|get|set|write_max_chip);
 #endif
 
 

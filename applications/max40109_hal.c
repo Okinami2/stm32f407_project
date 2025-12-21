@@ -10,7 +10,6 @@
  */
 
 #include "max40109_hal.h"
-#include "drv_soft_i2c.h"
 #include <rtthread.h>
 #include <rtdevice.h>
 #include "board.h"
@@ -21,40 +20,26 @@
 
 static struct rt_i2c_bus_device *i2c_bus;
 
-/* Array of alert pins for each MAX40109 chip */
 static const rt_base_t alert_pins[NUM_MAX_CHIPS] = {
-    BSP_nCH0_ALERT_PIN,   // CH0
-    BSP_nCH1_ALERT_PIN,   // CH1
-    BSP_nCH2_ALERT_PIN,   // CH2
-    BSP_nCH3_ALERT_PIN,   // CH3
-    BSP_nCH4_ALERT_PIN,   // CH4
-    BSP_nCH5_ALERT_PIN,   // CH5
-    BSP_nCH6_ALERT_PIN,   // CH6 - Placeholder or Valid
-    BSP_nCH7_ALERT_PIN    // CH7
+    BSP_nCH0_ALERT_PIN,
+    BSP_nCH1_ALERT_PIN,
+    BSP_nCH2_ALERT_PIN,
+    BSP_nCH3_ALERT_PIN,
+    BSP_nCH4_ALERT_PIN,
+    BSP_nCH5_ALERT_PIN,
+    BSP_nCH6_ALERT_PIN,
+    BSP_nCH7_ALERT_PIN
 };
 
-/* Semaphore for alert handling */
+static struct rt_mutex i2c_mux_lock; // 避免同时读写操作
 static rt_sem_t alert_sem = RT_NULL;
-/* Mask to track triggered channels, protected by interrupt disable/enable */
 static volatile rt_uint8_t g_triggered_channels_mask = 0;
 
+
 /* Thread stack and handle */
-#define ALERT_THREAD_STACK_SIZE 1024
+#define ALERT_THREAD_STACK_SIZE 2024
 #define ALERT_THREAD_PRIORITY   15
-static rt_thread_t alert_thread = RT_NULL;
-static rt_uint8_t alert_stack[ALERT_THREAD_STACK_SIZE];
 
-// Static function to select the active MAX40109 chip
-static void select_max_chip(rt_uint8_t chip_index)
-{
-    if (chip_index >= NUM_MAX_CHIPS) return;
-
-    rt_pin_write(BSP_I2C_3_8_BIT1_PIN, (chip_index & 0x01) ? PIN_HIGH : PIN_LOW); // LSB
-    rt_pin_write(BSP_I2C_3_8_BIT2_PIN, (chip_index & 0x02) ? PIN_HIGH : PIN_LOW);
-    rt_pin_write(BSP_I2C_3_8_BIT3_PIN, (chip_index & 0x04) ? PIN_HIGH : PIN_LOW); // MSB
-
-    rt_hw_us_delay(20);
-}
 
 /* Interrupt Handler */
 static void alert_irq_handler(void *args)
@@ -68,62 +53,83 @@ static void alert_irq_handler(void *args)
     rt_sem_release(alert_sem);
 }
 
+static void _select_max_chip(rt_uint8_t chip_index)
+{
+    if (chip_index >= NUM_MAX_CHIPS) return;
+    rt_pin_write(BSP_I2C_3_8_BIT1_PIN, (chip_index & 0x01) ? PIN_HIGH : PIN_LOW);
+    rt_pin_write(BSP_I2C_3_8_BIT2_PIN, (chip_index & 0x02) ? PIN_HIGH : PIN_LOW);
+    rt_pin_write(BSP_I2C_3_8_BIT3_PIN, (chip_index & 0x04) ? PIN_HIGH : PIN_LOW);
+    /* 给 Mux 切换预留微小的电平稳定时间 */
+    rt_hw_us_delay(10);
+}
 /**
- * @brief Reads a 16-bit register from MAX40109 (Big Endian)
+ * @brief 带互斥锁保护的 I2C 传输逻辑 (核心安全逻辑)
+ */
+static rt_err_t _max40109_transfer(rt_uint8_t chip_idx, struct rt_i2c_msg *msgs, rt_uint32_t num)
+{
+    rt_err_t res;
+    if (rt_mutex_take(&i2c_mux_lock, rt_tick_from_millisecond(100)) != RT_EOK)
+    {
+        return -RT_ETIMEOUT;
+    }
+    _select_max_chip(chip_idx);
+    if (rt_i2c_transfer(i2c_bus, msgs, num) == num)
+    {
+        res = RT_EOK;
+    }
+    else
+    {
+        res = -RT_EIO;
+    }
+    rt_mutex_release(&i2c_mux_lock);
+    return res;
+}
+/**
+ * @brief 读取 16 位寄存器
  */
 static rt_err_t max40109_read_reg(rt_uint8_t chip_idx, rt_uint8_t reg, rt_uint16_t *val)
 {
     struct rt_i2c_msg msgs[2];
     rt_uint8_t buf[2];
-
-    select_max_chip(chip_idx);
-
-    msgs[0].addr = MAX40109_I2C_ADDR;
+    msgs[0].addr  = MAX40109_I2C_ADDR;
     msgs[0].flags = RT_I2C_WR;
-    msgs[0].buf = &reg;
-    msgs[0].len = 1;
-
-    msgs[1].addr = MAX40109_I2C_ADDR;
+    msgs[0].buf   = &reg;
+    msgs[0].len   = 1;
+    msgs[1].addr  = MAX40109_I2C_ADDR;
     msgs[1].flags = RT_I2C_RD;
-    msgs[1].buf = buf;
-    msgs[1].len = 2;
-
-    if (rt_i2c_transfer(i2c_bus, msgs, 2) == 2)
+    msgs[1].buf   = buf;
+    msgs[1].len   = 2;
+    rt_err_t res = _max40109_transfer(chip_idx, msgs, 2);
+    if (res == RT_EOK)
     {
         *val = (buf[0] << 8) | buf[1];
-        return RT_EOK;
     }
-
-    LOG_E("I2C Read Error on Chip %d, Reg 0x%02X", chip_idx, reg);
-    return -RT_EIO;
+    return res;
 }
 
 /**
- * @brief Writes a 16-bit register to MAX40109 (Big Endian)
+ * @brief 写入 16 位寄存器
  */
 static rt_err_t max40109_write_reg(rt_uint8_t chip_idx, rt_uint8_t reg, rt_uint16_t val)
 {
     struct rt_i2c_msg msg;
     rt_uint8_t buf[3];
-
-    select_max_chip(chip_idx);
-
     buf[0] = reg;
     buf[1] = (rt_uint8_t)(val >> 8);
     buf[2] = (rt_uint8_t)(val & 0xFF);
-
-    msg.addr = MAX40109_I2C_ADDR;
+    msg.addr  = MAX40109_I2C_ADDR;
     msg.flags = RT_I2C_WR;
-    msg.buf = buf;
-    msg.len = 3;
+    msg.buf   = buf;
+    msg.len   = 3;
+    return _max40109_transfer(chip_idx, &msg, 1);
+}
 
-    if (rt_i2c_transfer(i2c_bus, &msg, 1) == 1)
-    {
-        return RT_EOK;
+rt_err_t global_max40109_write_reg(rt_uint8_t chip_idx, rt_uint8_t reg, rt_uint16_t val){
+    rt_err_t res = max40109_write_reg(chip_idx,reg,val);
+    if(res != RT_EOK){
+        return -RT_ERROR;
     }
-
-    LOG_E("I2C Write Error on Chip %d, Reg 0x%02X", chip_idx, reg);
-    return -RT_EIO;
+    return RT_EOK;
 }
 
 /**
@@ -190,19 +196,17 @@ static void handle_chip_alert(rt_uint8_t chip_idx)
  */
 static void alert_thread_entry(void *parameter)
 {
-    rt_uint8_t local_mask = 0;
-    int i;
-
     while (1)
     {
         if (rt_sem_take(alert_sem, RT_WAITING_FOREVER) == RT_EOK)
         {
-            rt_enter_critical();
+            rt_uint8_t local_mask;
+            rt_base_t level = rt_hw_interrupt_disable();
             local_mask = g_triggered_channels_mask;
             g_triggered_channels_mask = 0;
-            rt_exit_critical();
-
-            for (i = 0; i < NUM_MAX_CHIPS; i++)
+            rt_hw_interrupt_enable(level);
+            if (local_mask == 0) continue;
+            for (int i = 0; i < NUM_MAX_CHIPS; i++)
             {
                 if (local_mask & (1 << i))
                 {
@@ -218,9 +222,7 @@ static void alert_thread_entry(void *parameter)
  */
 rt_err_t max_app_init(void)
 {
-    int i;
 
-    /* 1. Init I2C Bus */
     i2c_bus = (struct rt_i2c_bus_device *)rt_device_find(I2C_BUS_NAME);
     if (i2c_bus == RT_NULL)
     {
@@ -228,7 +230,7 @@ rt_err_t max_app_init(void)
         return -RT_ENOSYS;
     }
 
-    /* 2. Hardware Power-Up Sequence */
+
     rt_pin_mode(BSP_ADC_POWER_EN_PIN, PIN_MODE_OUTPUT);
     rt_pin_mode(BSP_VCC_5V_EN_PIN, PIN_MODE_OUTPUT);
     rt_pin_mode(BSP_ANPWR_EN_PIN, PIN_MODE_OUTPUT);
@@ -246,42 +248,47 @@ rt_err_t max_app_init(void)
     rt_pin_write(BSP_VCC_N_15_PIN, PIN_HIGH);
     rt_pin_write(BSP_I2C_3_8_EN_PIN, PIN_HIGH);
 
-    rt_thread_mdelay(100); // Wait for power stabilization
+    rt_thread_mdelay(100);
 
-    /* 3. Initialize Semaphore and Thread */
-    alert_sem = rt_sem_create("max_alert", 0, RT_IPC_FLAG_FIFO);
+    rt_mutex_init(&i2c_mux_lock, "max_mux", RT_IPC_FLAG_FIFO);
+    rt_sem_init(alert_sem, "max_sem", 0, RT_IPC_FLAG_FIFO);
+    rt_thread_t tid = rt_thread_create("max_thread",
+                                        alert_thread_entry,
+                                        RT_NULL,
+                                        ALERT_THREAD_STACK_SIZE,
+                                        ALERT_THREAD_PRIORITY,
+                                        10);
+    if (tid != RT_NULL)
+        rt_thread_startup(tid);
+    else
+        return -RT_ENOMEM;
 
-    //alert_thread = rt_thread_create("max_task", alert_thread_entry, RT_NULL,
-    //                                ALERT_THREAD_STACK_SIZE, ALERT_THREAD_PRIORITY, 10);
-    if (alert_thread != RT_NULL)
-        rt_thread_startup(alert_thread);
 
-    /* 4. Configure each MAX40109 Chip */
-    for (i = 0; i < NUM_MAX_CHIPS; i++)
+    for (int i = 0; i < NUM_MAX_CHIPS; i++)
     {
-        /* Init Alert Pin */
-        if (alert_pins[i] != 0) // Check for valid pin
+        if (alert_pins[i] != 0)
         {
             rt_pin_mode(alert_pins[i], PIN_MODE_INPUT_PULLUP);
             rt_pin_attach_irq(alert_pins[i], PIN_IRQ_MODE_FALLING, alert_irq_handler, (void*)(rt_ubase_t)i);
         }
 
-        /* I2C Configuration */
         // Set Sample Rate to default 1ksps
-        max40109_write_reg(i, MAX40109_REG_ADC_SAMPLE_RATE, 0x0001);
+        if (max40109_write_reg(i, MAX40109_REG_ADC_SAMPLE_RATE, 0x0001) != RT_EOK)
+        {
+            LOG_E("CH%d ADC Config Failed!", i);
+            continue;
+        }
 
         // Enable Interrupts default disable temp_data ready and pressure_data ready
         max40109_write_reg(i, MAX40109_REG_INTERRUPT_ENABLE, 0x0FF);
 
         // Clear any pending status bits at startup
-        rt_uint16_t dummy_status;
-        max40109_read_reg(i, MAX40109_REG_STATUS, &dummy_status);
-        if (dummy_status != 0)
+        rt_uint16_t dummy;
+        if (max40109_read_reg(i, MAX40109_REG_STATUS, &dummy) == RT_EOK && dummy != 0)
         {
-            max40109_write_reg(i, MAX40109_REG_STATUS, dummy_status);
+            max40109_write_reg(i, MAX40109_REG_STATUS, dummy);
         }
 
-        /* Enable IRQ after chip config is done */
         if (alert_pins[i] != 0)
         {
             rt_pin_irq_enable(alert_pins[i], PIN_IRQ_ENABLE);
@@ -292,17 +299,3 @@ rt_err_t max_app_init(void)
     return RT_EOK;
 }
 
-
-rt_err_t max40109_read_pressure(rt_uint8_t chip_idx, float *pressure)
-{
-    /*
-    rt_uint16_t raw;
-    rt_err_t ret = max40109_read_reg(chip_idx, MAX40109_REG_CALIBRATED_PRESSURE, &raw);
-    if (ret != RT_EOK) return ret;
-
-    int16_t signed_raw = (int16_t)raw;
-    *pressure = (float)signed_raw / 32768.0f;
-
-    */
-    return RT_EOK;
-}
