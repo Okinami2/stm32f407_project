@@ -26,7 +26,6 @@ INIT_COMPONENT_EXPORT(rt_hw_ads131m08_spi_init);
 
 static void adc_drdy_isr(void *args)
 {
-    rt_pin_irq_enable(BSP_nADC_DRDY_PIN, PIN_IRQ_DISABLE);
     if (drdy_sem != RT_NULL) rt_sem_release(drdy_sem);
 }
 
@@ -277,6 +276,7 @@ rt_err_t ads131m08_init(void)
 
 rt_err_t ads131m08_read_data_frame(rt_int32_t *buffer, rt_bool_t is_first_read)
 {
+    rt_pin_irq_enable(BSP_nADC_DRDY_PIN, PIN_IRQ_DISABLE);
     rt_uint8_t dummy_tx[ADC_FRAME_WORD_COUNT * 4] = {0};
     rt_uint8_t rx_buf[ADC_FRAME_WORD_COUNT * 4] = {0};
 

@@ -56,7 +56,6 @@ rt_err_t sdnand_init_mount(void)
         if (dfs_mount("sdnand0", "/", "elm", 0, 0) == 0) {
             LOG_I("Retry mount success!");
         } else {
-            ts_spi_bus_release();
             LOG_E("Retry mount failed.");
         }
     }
@@ -72,10 +71,13 @@ int main(void)
         rt_kprintf("fail start config_thread\n");
     }
 
-    /*
+    if(sdnand_init_mount() != RT_EOK){
+        rt_kprintf("fail start sdnand_init_mount\n");
+    }
+
     if(max_app_init() != RT_EOK){
         rt_kprintf("fail max_app_init\n");
-    }*/
+    }
 
     if(adc_get_thread_start() != RT_EOK){
         rt_kprintf("fail start adc_get_thread\n");
@@ -83,10 +85,6 @@ int main(void)
 
     if(adc_send_to_server_start() != RT_EOK){
         rt_kprintf("fail start adc_send_thread\n");
-    }
-
-    if(sdnand_init_mount() != RT_EOK){
-        rt_kprintf("fail start sdnand_init_mount\n");
     }
 
 
@@ -102,7 +100,13 @@ int main(void)
                            sys_cal.hour, sys_cal.minute, sys_cal.second,
                            sys_cal.microsecond);
         */
-        rt_thread_mdelay(3000);
+        /* 读取max芯片测量电压值
+        */
+        //int pressure = 0;
+        //max40109_read_pressure(0,&pressure);
+        //rt_kprintf("ch0: %d \n",pressure);
+
+        rt_thread_mdelay(1000);
 
     }
     return RT_EOK;

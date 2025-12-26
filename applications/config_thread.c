@@ -26,8 +26,8 @@ rt_mq_t config_update_notify = RT_NULL;
 
 app_config_t app_config = {
         .adc_gain = 1,
-        .sample_rate = 50,
-        .adc_enable_channel = 0,
+        .sample_rate = 1,
+        .adc_enable_channel = 11111111,
         .strain_S1 = 1.0,
         .epsilon_0 = 0.0,
         .acceleration_S2 = 1.0,
@@ -337,7 +337,7 @@ void config_print_all(void)
     rt_kprintf("-----------------------\n");
 }
 
-static rt_err_t write_max_chip(const char* id_str, const char* addr_str, const char* val_str)
+static rt_err_t write_max_chip(const char* id_str, const char* addr_str, const char* val_str,rt_uint8_t len)
 {
     rt_uint8_t reg_addr;
     rt_uint16_t reg_val;
@@ -349,7 +349,7 @@ static rt_err_t write_max_chip(const char* id_str, const char* addr_str, const c
         rt_kprintf("Writing 0x%04X to Reg 0x%02X on ALL chips...\n", reg_val, reg_addr);
         for (rt_uint8_t i = 0; i < 8; i++)
         {
-            if (global_max40109_write_reg(i, reg_addr, reg_val) != RT_EOK)
+            if (global_max40109_write_reg(i, reg_addr, reg_val,len) != RT_EOK)
             {
                 rt_kprintf("Chip %d: Fail\n", i);
                 res = -RT_EIO;
@@ -364,8 +364,29 @@ static rt_err_t write_max_chip(const char* id_str, const char* addr_str, const c
             rt_kprintf("Invalid Chip ID: %d (0-7 or 'all')\n", chip_idx);
             return -RT_ERROR;
         }
-        res = global_max40109_write_reg(chip_idx, reg_addr, reg_val);
+        res = global_max40109_write_reg(chip_idx, reg_addr, reg_val,len);
     }
+    return res;
+}
+
+static rt_err_t read_max_chip(const char* id_str, const char* addr_str,rt_uint8_t len)
+{
+    rt_uint8_t reg_addr;
+    rt_err_t res = RT_EOK;
+    reg_addr = (rt_uint8_t)strtol(addr_str, NULL, 0);
+    rt_uint8_t chip_idx = (rt_uint8_t)atoi(id_str);
+
+    if (chip_idx >= 8)
+    {
+        rt_kprintf("Invalid Chip ID: %d (0-7)\n", chip_idx);
+        return -RT_ERROR;
+    }
+    rt_uint16_t val;
+
+    res = global_max40109_read_reg(chip_idx, reg_addr,&val,len);
+
+    if (res == RT_EOK) rt_kprintf("current value: Chip[%d] [0x%X] = Value[0x%X]\n",chip_idx, reg_addr,val);
+
     return res;
 }
 
@@ -419,7 +440,7 @@ static int finsh_cmd_config(int argc, char **argv)
     else if (strcmp(argv[1], "set") == 0)
     {
         if (argc != 4) {
-             rt_kprintf("usage: config set <name> <value>\n"); 
+             rt_kprintf("usage: config set <name> <value>\n");
              return -RT_ERROR; 
         }
 
@@ -433,24 +454,51 @@ static int finsh_cmd_config(int argc, char **argv)
     }
     else if (strcmp(argv[1], "write_max_chip") == 0)
     {
-        //config write_max_chip <id> <reg> <value>
-        if (argc != 5)
+        //config write_max_chip <id> <reg> <value> <len>
+        if (argc != 6)
         {
-            rt_kprintf("Usage: config write_max_chip <id(0-7|all)> <reg> <value>\n");
-            rt_kprintf("E.g. : config write_max_chip 0 0x0E 0x0200\n");
-            rt_kprintf("       config write_max_chip all 0x14 0x0001\n");
+            rt_kprintf("Usage: config write_max_chip <id(0-7|all)> <reg> <value> <len>\n");
+            rt_kprintf("E.g. : config write_max_chip 0 0x0E 0x0200 2\n");
+            rt_kprintf("       config write_max_chip all 0x14 0x0001 1\n");
             return -RT_ERROR;
         }
-        if (write_max_chip(argv[2], argv[3], argv[4]) == RT_EOK)
-        {
-            rt_kprintf("Write successful: Chip[%s] Reg[%s] = Value[%s]\n", argv[2], argv[3], argv[4]);
+
+        if(strcmp(argv[5], "1") == 0){
+            if(write_max_chip(argv[2], argv[3], argv[4], 1) != RT_EOK){
+                return -RT_ERROR;
+            }
         }
-        else
-        {
-            rt_kprintf("Write FAILED: Chip[%s] Reg[%s]\n", argv[2], argv[3]);
+        else if(strcmp(argv[5], "2") == 0){
+            if(write_max_chip(argv[2], argv[3], argv[4], 2) != RT_EOK){
+                return -RT_ERROR;
+            }
         }
+
         return RT_EOK;
     }
+    else if (strcmp(argv[1], "read_max_chip") == 0)
+    {
+        //config read_max_chip <id> <reg> <len>
+        if (argc != 5)
+        {
+            rt_kprintf("Usage: config read_max_chip <id(0-7)> <reg> <len>\n");
+            rt_kprintf("E.g. : config read_max_chip 0 0x0E 2\n");
+            return -RT_ERROR;
+        }
+        if(strcmp(argv[4], "1") == 0){
+            if(read_max_chip(argv[2], argv[3],1) != RT_EOK){
+                return -RT_ERROR;
+            }
+        }
+        else if(strcmp(argv[4], "2") == 0){
+            if(read_max_chip(argv[2], argv[3],2) != RT_EOK){
+                return -RT_ERROR;
+            }
+        }
+
+        return RT_EOK;
+    }
+
     rt_kprintf("unknown subcommand\n");
     return -RT_ERROR;
 }

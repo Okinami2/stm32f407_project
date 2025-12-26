@@ -80,4 +80,3 @@ void ts_spi_bus_release(void) {
     _set_mux_mode(MODE_GNSS);
     rt_hw_interrupt_enable(level);
 }
-
