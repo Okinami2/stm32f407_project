@@ -78,6 +78,7 @@ static void adc_get_thread_entry(void *parameter)
                     break;
                 case CONFIG_SAMPLE_RATE:
                     rt_sem_control(tim3_sem, RT_IPC_CMD_RESET, 0);
+                    batch_index = 0;
                     break;
                 case CONFIG_OUTLIER_MAX:
                 case CONFIG_OUTLIER_MIN:
@@ -101,14 +102,17 @@ static void adc_get_thread_entry(void *parameter)
             if (rt_sem_take(tim3_sem, RT_WAITING_FOREVER) == RT_EOK){
                 if (rt_sem_take(drdy_sem, rt_tick_from_millisecond(5)) == RT_EOK)
                 {
-                    ts_get_calendar_time(&sys_time);
-                    adc_receive_buffer.time[batch_index].year = sys_time.year;
-                    adc_receive_buffer.time[batch_index].month = sys_time.month;
-                    adc_receive_buffer.time[batch_index].day = sys_time.day;
-                    adc_receive_buffer.time[batch_index].hour = sys_time.hour;
-                    adc_receive_buffer.time[batch_index].minute = sys_time.minute;
-                    adc_receive_buffer.time[batch_index].second = sys_time.second;
-                    adc_receive_buffer.time[batch_index].microsecond = sys_time.microsecond;
+                    if(batch_index % BATCH_SIZE == 0){
+                        ts_get_calendar_time(&sys_time);
+                        adc_receive_buffer.start_time.year = sys_time.year;
+                        adc_receive_buffer.start_time.month = sys_time.month;
+                        adc_receive_buffer.start_time.day = sys_time.day;
+                        adc_receive_buffer.start_time.hour = sys_time.hour;
+                        adc_receive_buffer.start_time.minute = sys_time.minute;
+                        adc_receive_buffer.start_time.second = sys_time.second;
+                        adc_receive_buffer.start_time.microsecond = sys_time.microsecond;
+                        adc_receive_buffer.sample_rate = app_config.sample_rate;
+                    }
                     if (ads131m08_read_data_frame(adc_data_buffer, RT_FALSE) == RT_EOK)
                     {
                         rt_int32_t *p_src_data; // 定义源数据指针
@@ -154,7 +158,6 @@ static void adc_get_thread_entry(void *parameter)
                         }
 
                         /* 在这里测试采集数据情况 [0]代表通道0
-                        */
                         int a = (int)p_dest_channels[0][batch_index];
                         int b = (int)(p_dest_channels[0][batch_index] - a) * 1000000;
                         if(b<0){
@@ -164,6 +167,7 @@ static void adc_get_thread_entry(void *parameter)
                             rt_kprintf("ch0: %d.%d \n",a,b);
                         }
 
+                        */
                         batch_index++;
 
                         if (batch_index % BATCH_SIZE == 0) {
@@ -187,28 +191,28 @@ static void adc_get_thread_entry(void *parameter)
  */
 int adc_get_thread_start(void)
 {
-    /* 创建信号量 */
+    /* create the semaphore */
     adc_get_done_sem = rt_sem_create("adc_get_done_sem", 0, RT_IPC_FLAG_FIFO);
     if (adc_get_done_sem == RT_NULL) {
         rt_kprintf("[ADC-APP] Error: Failed to create semaphore adc_get_done_sem.\n");
         return -RT_ERROR;
     }
 
-    /* 初始化ADS131M08 */
+    /* init ADS131M08 */
     if (ads131m08_init() != RT_EOK) {
         rt_kprintf("[ADC-APP] Error: ADS131M08 initialization failed.\n");
         rt_sem_delete(adc_get_done_sem);
         return -RT_ERROR;
     }
 
-    /* 初始化定时器 */
+    /* init hw_timer  */
     if (tim3_init() != RT_EOK) {
         rt_kprintf("[ADC-APP] Error: TIM3 initialization failed.\n");
         rt_sem_delete(adc_get_done_sem);
         return -RT_ERROR;
     }
 
-    /* 初始化滤波器 */
+    /* init digital filter */
     rt_int32_t outlier_max = app_config.outlier_max;
     rt_int32_t outlier_min = app_config.outlier_min;
     rt_int32_t gradient_threshold = app_config.gradient_threshold;
@@ -231,10 +235,10 @@ int adc_get_thread_start(void)
             return -RT_ERROR;
         }
 
-        /* 启动线程 */
+        /* start thread */
         rt_thread_startup(tid);
 
-        /* 启用DRDY引脚中断 */
+        /* enable drdy pin irq */
         rt_pin_irq_enable(BSP_nADC_DRDY_PIN, PIN_IRQ_ENABLE);
 
         LOG_I("[ADC-APP] ADC sampling system initialized successfully.\n");

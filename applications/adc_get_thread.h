@@ -16,9 +16,11 @@
 #include "time_service.h"
 
 
-#define BATCH_SIZE 32
+#define BATCH_SIZE 64
 
 typedef struct {
+    sys_calendar_time_t start_time;
+    rt_uint8_t sample_rate;
     float ad0[BATCH_SIZE * 2];
     float ad1[BATCH_SIZE * 2];
     float ad2[BATCH_SIZE * 2];
@@ -27,7 +29,6 @@ typedef struct {
     float ad5[BATCH_SIZE * 2];
     float ad6[BATCH_SIZE * 2];
     float ad7[BATCH_SIZE * 2];
-    sys_calendar_time_t time[BATCH_SIZE * 2];
 } ADC_Receive_Buffer;
 
 extern rt_sem_t adc_get_done_sem;

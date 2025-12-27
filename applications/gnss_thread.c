@@ -12,6 +12,11 @@
 #include "time_service.h"
 #include "sd_spi_switch.h"
 
+
+#define DBG_TAG "gnss_thread"
+#define DBG_LVL DBG_INFO
+#include <rtdbg.h>
+
 #define GNSS_UART_NAME       "uart5"
 
 static rt_sem_t rx_sem = RT_NULL;
@@ -134,6 +139,24 @@ static int parse_rmc_time(const char *nmea_line, time_t *out_timestamp)
     return 0;
 }
 
+void gnss_uart_suspend(void)
+{
+    if (serial_dev)
+    {
+        rt_device_close(serial_dev);
+    }
+}
+
+void gnss_uart_resume(void)
+{
+    if (serial_dev)
+    {
+        rt_device_open(serial_dev, RT_DEVICE_FLAG_DMA_RX);
+
+        rt_device_set_rx_indicate(serial_dev, uart_input_callback);
+    }
+}
+
 
 static void gnss_thread_entry(void *parameter)
 {
@@ -193,7 +216,7 @@ int gnss_service_init(void)
     serial_dev = rt_device_find(GNSS_UART_NAME);
     if (!serial_dev)
     {
-        rt_kprintf("Error: GNSS UART not found!\n");
+        LOG_E("GNSS UART not found!");
         return -RT_ERROR;
     }
 

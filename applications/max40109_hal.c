@@ -56,7 +56,6 @@ static volatile rt_uint8_t g_triggered_channels_mask = 0;
 /* Interrupt Handler */
 static void alert_irq_handler(void *args)
 {
-    rt_kprintf("alert irq\n");
     rt_uint8_t channel = (rt_uint8_t)(rt_ubase_t)args;
 
     rt_enter_critical();
@@ -78,7 +77,6 @@ static void _select_max_chip(rt_uint8_t chip_index)
     rt_pin_write(BSP_I2C_3_8_BIT2_PIN, (chip_index & 0x02) ? PIN_HIGH : PIN_LOW);
     rt_pin_write(BSP_I2C_3_8_BIT3_PIN, (chip_index & 0x04) ? PIN_HIGH : PIN_LOW);
 
-    /* 增加到 20us 确保在大电容总线下电平彻底稳定 */
     rt_hw_us_delay(20);
 }
 
@@ -89,7 +87,6 @@ static rt_err_t _max40109_transfer(rt_uint8_t chip_idx, struct rt_i2c_msg *msgs,
 {
     rt_err_t res;
 
-    /* 尝试获取互斥锁 */
     if (rt_mutex_take(&i2c_mux_lock, rt_tick_from_millisecond(100)) != RT_EOK)
     {
         return -RT_ETIMEOUT;
@@ -97,7 +94,7 @@ static rt_err_t _max40109_transfer(rt_uint8_t chip_idx, struct rt_i2c_msg *msgs,
 
     _select_max_chip(chip_idx);
 
-    /* 执行 I2C 传输：多 msgs 会自动触发 Repeated Start */
+    /* 多 msgs 会自动触发 Repeated Start */
     if (rt_i2c_transfer(i2c_bus, msgs, num) == num)
     {
         res = RT_EOK;
@@ -112,7 +109,7 @@ static rt_err_t _max40109_transfer(rt_uint8_t chip_idx, struct rt_i2c_msg *msgs,
 }
 
 /**
- * @brief 通用写寄存器函数 (支持 1 或 2 字节)
+ * @brief 通用写寄存器函数
  * @param len 1 为单字节写，2 为双字节写
  */
 rt_err_t max40109_write_reg(rt_uint8_t chip_idx, rt_uint8_t reg, rt_uint16_t val, rt_uint8_t len)
@@ -123,7 +120,7 @@ rt_err_t max40109_write_reg(rt_uint8_t chip_idx, rt_uint8_t reg, rt_uint16_t val
     buf[0] = reg;
     if (len == 2)
     {
-        buf[1] = (rt_uint8_t)(val >> 8);   // 高字节在前
+        buf[1] = (rt_uint8_t)(val >> 8);
         buf[2] = (rt_uint8_t)(val & 0xFF);
     }
     else
@@ -134,13 +131,13 @@ rt_err_t max40109_write_reg(rt_uint8_t chip_idx, rt_uint8_t reg, rt_uint16_t val
     msg.addr  = MAX40109_I2C_ADDR;
     msg.flags = RT_I2C_WR;
     msg.buf   = buf;
-    msg.len   = len + 1; // 寄存器地址 + 数据长度
+    msg.len   = len + 1;
 
     return _max40109_transfer(chip_idx, &msg, 1);
 }
 
 /**
- * @brief 通用读寄存器函数 (支持 1 或 2 字节)
+ * @brief 通用读寄存器函数
  * @param len 1 为单字节读，2 为双字节读
  */
 rt_err_t max40109_read_reg(rt_uint8_t chip_idx, rt_uint8_t reg, rt_uint16_t *val, rt_uint8_t len)
@@ -165,7 +162,7 @@ rt_err_t max40109_read_reg(rt_uint8_t chip_idx, rt_uint8_t reg, rt_uint16_t *val
     {
         if (len == 2)
         {
-            *val = (rt_uint16_t)((read_buf[0] << 8) | read_buf[1]); // 高字节在前
+            *val = (rt_uint16_t)((read_buf[0] << 8) | read_buf[1]);
         }
         else
         {
@@ -174,7 +171,7 @@ rt_err_t max40109_read_reg(rt_uint8_t chip_idx, rt_uint8_t reg, rt_uint16_t *val
     }
     else
     {
-        *val = 0; // 错误时清零
+        *val = 0;
     }
 
     return res;
@@ -269,12 +266,11 @@ static void handle_chip_alert(rt_uint8_t chip_idx)
         LOG_W("CH%d MAX_STATUS_UV_DRV: 0x%04X", chip_idx, status);
     }
 
-    /*Handle Data Ready */
     if (status & MAX_STATUS_PRESS_READY)
     {
     }
 
-    /* Clear Status bits */
+    // Clear Status
     max40109_write_u16(chip_idx, MAX40109_REG_STATUS, status);
 }
 
@@ -359,15 +355,22 @@ rt_err_t max_app_init(void)
             rt_pin_attach_irq(alert_pins[i], PIN_IRQ_MODE_FALLING, alert_irq_handler, (void*)(rt_ubase_t)i);
         }
 
-        // Set Sample Rate to default 1ksps
-        if (max40109_write_u16(i, MAX40109_REG_ADC_SAMPLE_RATE, 0x0001) != RT_EOK)
-        {
-            LOG_E("CH%d ADC Config Failed!", i);
-            continue;
-        }
+        rt_err_t res = RT_EOK;
+
+        // shutdown to config register
+        res = max40109_write_u16(i, MAX40109_REG_CONFIG, 0x80);
+
+        //set bridge drive to 4V
+        res = max40109_write_u8(i, MAX40109_REG_BRIDGE_DRIVE, 0x2);
 
         // Enable Interrupts default disable temp_data ready and pressure_data ready
-        max40109_write_u16(i, MAX40109_REG_INTERRUPT_ENABLE, 0x0FF);
+        res = max40109_write_u16(i, MAX40109_REG_INTERRUPT_ENABLE, 0xFF);
+
+        // Set Sample Rate to 2ksps
+        res = max40109_write_u8(i, MAX40109_REG_ADC_SAMPLE_RATE, 0x2);
+
+        //set analog output stage absolute voltage internal resistor
+        res = max40109_write_u8(i, MAX40109_REG_ANALOG_OUTPUT_STAGE, 0x8);
 
         // Clear any pending status bits at startup
         rt_uint16_t dummy;
@@ -376,28 +379,38 @@ rt_err_t max_app_init(void)
             max40109_write_u16(i, MAX40109_REG_STATUS, dummy);
         }
 
+        // power on
+        res = max40109_read_u16(i, MAX40109_REG_CONFIG, 0x00);
+
+        if(res != RT_EOK){
+            LOG_W("CH[%d] max40109 config init didn't success",i);
+            continue;
+        }
+
         if (alert_pins[i] != 0)
         {
             rt_pin_irq_enable(alert_pins[i], PIN_IRQ_ENABLE);
         }
+
+
     }
 
-    LOG_I("MAX40109 Init Completed for %d chips", NUM_MAX_CHIPS);
+    LOG_I("MAX40109 Init Completed", NUM_MAX_CHIPS);
     return RT_EOK;
 }
 
 rt_err_t max40109_read_pressure(rt_uint8_t chip_idx, int *pressure)
 {
     rt_uint16_t raw;
-    rt_err_t ret = max40109_read_u16(chip_idx, 0x06, &raw);
+    //rt_err_t ret = max40109_read_u16(chip_idx, MAX40109_REG_UNCAL_PRESSURE, &raw);
+    rt_err_t ret = max40109_read_u16(chip_idx, MAX40109_REG_CALIBRATED_PRESSURE, &raw);
     if (ret != RT_EOK) {
         return ret;
     }
 
-    // 直接转换为有符号16位整数（就是标准的int16_t）
     int16_t signed_raw = (int16_t)raw;
 
-    *pressure = (int)signed_raw;  // 如果需要32位输出
+    *pressure = (int)signed_raw;
 
     return RT_EOK;
 }

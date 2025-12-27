@@ -148,6 +148,8 @@
 
 /* POSIX (Portable Operating System Interface) layer */
 
+#define RT_USING_POSIX_FS
+#define RT_USING_POSIX_DEVIO
 
 /* Interprocess Communication (IPC) */
 

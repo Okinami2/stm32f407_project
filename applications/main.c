@@ -33,7 +33,9 @@ rt_err_t sdnand_init_mount(void)
 {
     rt_pin_write(BSP_RFMODPWR_EN_PIN,PIN_HIGH);
     rt_pin_write(BSP_TFPWR_EN_PIN,PIN_HIGH);
+
     ts_spi_bus_claim();
+
     rt_thread_mdelay(100);
     rt_pin_mode(BSP_SD_CS_PIN,PIN_MODE_OUTPUT);
     rt_err_t res = rt_hw_spi_device_attach("spi3", "spi30", SD_CS_GPIO_Port, SD_CS_Pin);
@@ -59,6 +61,7 @@ rt_err_t sdnand_init_mount(void)
             LOG_E("Retry mount failed.");
         }
     }
+
     ts_spi_bus_release();
     return RT_EOK;
 }
