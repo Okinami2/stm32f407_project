@@ -13,6 +13,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <sys/time.h>
+#include <math.h>
 #include <string.h>
 #include "time_service.h"
 
@@ -26,7 +27,7 @@
 #define NTP_ITERATIONS      8
 #define NTP_INTERVAL_MS     100
 #define NTP_TIMEOUT_MS      2000
-#define DEFAULT_SYNC_INTERVAL_MINUTES 30
+#define DEFAULT_SYNC_INTERVAL_MINUTES 60
 
 typedef struct __attribute__((packed)) {
     uint8_t  li_vn_mode;
@@ -160,8 +161,17 @@ int ntp_sync(void)
     int32_t off_usec = (int32_t)(avg_offset % 1000000LL);
     if (off_usec < 0) { off_sec -= 1; off_usec += 1000000; }
 
-    rt_kprintf("NTP: final offset = %lld us (delay=%lld us)\n",
-               (long long)avg_offset, (long long)samples[0][1]);
+    // 计算标准差（stddev）
+    double stddev = 0;
+    for (i = 0; i < use_count; i++)
+    {
+        double diff = (double)samples[i][0] - (double)avg_offset;
+        stddev += diff * diff;
+    }
+    stddev = sqrt(stddev / use_count);
+
+    rt_kprintf("NTP: final offset = %lld us (delay=%lld us) stddev = %.2f us\n",
+               (long long)avg_offset, (long long)samples[0][1], stddev);
 
     ts_correct_time_by_ntp_offset_us(avg_offset);
 
@@ -170,15 +180,15 @@ int ntp_sync(void)
 
 static void ntp_sync_thread_entry(void *parameter)
 {
-    rt_thread_mdelay(10000);
+    rt_thread_mdelay(5000);
 
     while (1)
     {
         if(ntp_sync() != 0){
             rt_kprintf("ntp sync failed. please check the network.\n");
         }
-        rt_tick_t delay_tick = DEFAULT_SYNC_INTERVAL_MINUTES * 60 * RT_TICK_PER_SECOND;
-        //rt_tick_t delay_tick = RT_TICK_PER_SECOND * 30;
+        //rt_tick_t delay_tick = DEFAULT_SYNC_INTERVAL_MINUTES * 60 * RT_TICK_PER_SECOND;
+        rt_tick_t delay_tick = RT_TICK_PER_SECOND * 30;
 
         rt_thread_delay(delay_tick);
     }

@@ -22,6 +22,12 @@
 static rt_sem_t rx_sem = RT_NULL;
 static rt_device_t serial_dev = RT_NULL;
 
+
+static volatile int g_fix_quality = 0;
+static volatile int g_sat_used    = 0;
+static volatile float g_hdop      = 99.9f;
+
+
 static rt_err_t uart_input_callback(rt_device_t dev, rt_size_t size)
 {
     rt_sem_release(rx_sem);
@@ -139,6 +145,41 @@ static int parse_rmc_time(const char *nmea_line, time_t *out_timestamp)
     return 0;
 }
 
+static int parse_gga_sat_used(const char *nmea_line, int *fix_quality, int *sat_used,float *hdop)
+{
+
+    // GGA 格式: $GNGGA,UTC,Latitude,N/S,Longitude,E/W,Position Fix Indicator,Satellites Used,HDOP,MSL Altitude,AltUnit,GeoSep,GeoSepUnit...
+    // 字段索引:  0   1   2        3   4         5   6                      7               8    9   10       11      12
+    const char *fields[20] = {0};
+    int field_idx = 0;
+    const char *p = nmea_line;
+    while (*p && *p != ',') p++;
+    if (*p != ',') return -1;
+    while (*p && *p != '*' && *p != '\r' && *p != '\n' && field_idx < 15)
+    {
+        if (*p == ',') {
+            p++;
+            fields[field_idx++] = p;
+            while (*p && *p != ',' && *p != '*' && *p != '\r' && *p != '\n') {
+                p++;
+            }
+        } else {
+            p++;
+        }
+    }
+
+    if (field_idx < 15) {
+        return -1;
+    }
+
+    *fix_quality = atoi(fields[5]);      // fix quality
+    *sat_used = atoi(fields[6]);         // satellites used
+    *hdop = atof(fields[7]);             // HDOP
+    return 0;
+}
+
+
+
 void gnss_uart_suspend(void)
 {
     if (serial_dev)
@@ -198,6 +239,18 @@ static void gnss_thread_entry(void *parameter)
                             // 解析失败或 Status='V' (未定位)
                         }
                     }
+                    else if(rt_strstr(line_buffer, "GGA")){
+                        int fq, used;
+                        float hdop;
+                        if (parse_gga_sat_used(line_buffer, &fq, &used,&hdop) == 0) {
+                            g_fix_quality = fq;
+                            g_sat_used = used;
+                            g_hdop = hdop;
+                            // rt_kprintf("[GNSS] fix=%d, used=%d\n, hdop=%d", fq, used,hdop);
+                        }
+                    }
+
+
 
                     line_idx = 0;
                 }
@@ -241,3 +294,19 @@ int gnss_service_init(void)
     return RT_EOK;
 }
 INIT_APP_EXPORT(gnss_service_init);
+
+
+int gnss_get_fix_quality(void)
+{
+    return g_fix_quality;
+}
+
+int gnss_get_satellites_used(void)
+{
+    return g_sat_used;
+}
+
+float gnss_get_hdop(void)
+{
+    return g_hdop;
+}

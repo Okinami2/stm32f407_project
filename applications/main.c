@@ -109,6 +109,24 @@ int main(void)
         //max40109_read_pressure(0,&pressure);
         //rt_kprintf("ch0: %d \n",pressure);
 
+        /* 卫星测试代码
+        int quality = gnss_get_fix_quality();
+        int sats    = gnss_get_satellites_used();
+        float hdop  = gnss_get_hdop();
+
+        if (quality >= 1)
+        {
+            rt_kprintf("[GNSS] 已定位 | 卫星数: %d | HDOP: %.2f (质量", sats, hdop);
+            if (hdop < 1.5f)      rt_kprintf("极好)\n");
+            else if (hdop < 2.0f) rt_kprintf("优秀)\n");
+            else if (hdop < 4.0f) rt_kprintf("一般)\n");
+            else                  rt_kprintf("较差)\n");
+        }
+        else
+        {
+            rt_kprintf("[GNSS] 未定位（Fix Quality = 0）\n");
+        }
+        */
         rt_thread_mdelay(1000);
 
     }

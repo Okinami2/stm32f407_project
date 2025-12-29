@@ -15,70 +15,95 @@
 extern UART_HandleTypeDef huart5;
 extern TIM_HandleTypeDef htim2;
 
-typedef struct
-{
-    volatile uint32_t last_pps_hw_tick;   /* 上一次 PPS 的硬件计数器值 */
-    volatile uint32_t last_pps_sw_tick;   /* 上一次 PPS 的系统 Tick (用于超时监控) */
-    volatile time_t   base_utc_sec;       /* 上一次 PPS 对应的 UTC 秒数 */
 
-    volatile double   ticks_per_sec;      /* 当前估算的每秒硬件 tick 数 */
-
-    volatile PPS_State_t pps_state;
-    volatile uint8_t  pps_valid_cnt;      /* ACQUIRING 计数器 */
-
-    volatile ts_ref_source_t ref_source;
-} ts_ctrl_t;
+typedef struct {
+    uint32_t system_base_sec;   // 最近一次确定的基准秒 (UTC)
+    uint32_t last_pps_tick;     // 最近一次 PPS 触发时的硬件计数器值
+    uint32_t   last_pps_ovf;         // 硬件计数器溢出次数
+    double   ticks_per_sec;     // 滤波器修正后的频率
+    PPS_State_t state;          // 状态机状态
+} TimeEngine_t;
 
 
 static rt_timer_t s_pps_timeout_timer = RT_NULL;
+static rt_uint8_t acquiring_pps_cnt = 0;
 
-static ts_ctrl_t g_ts = {
-    .last_pps_hw_tick = 0,
-    .last_pps_sw_tick = 0,
-    .base_utc_sec = 0,  // 明确初始化
-    .ticks_per_sec = TS_TICKS_PER_SEC_NOMINAL,
-    .pps_state = PPS_STATE_INIT,
-    .pps_valid_cnt = 0,
-    .ref_source = TS_REF_NONE
+static TimeEngine_t engine = {
+        .system_base_sec = 0,
+        .last_pps_tick = 0,
+        .last_pps_ovf = 0,
+        .ticks_per_sec = TS_TICKS_PER_SEC_NOMINAL,
+        .state = PPS_STATE_INIT
 };
 
-static void _spll_update(uint32_t delta_ticks) {
-    const double alpha = 0.1;
-    g_ts.ticks_per_sec = (1.0 - alpha) * g_ts.ticks_per_sec + alpha * (double)delta_ticks;
+
+extern TIM_HandleTypeDef htim2;
+static volatile uint32_t tim2_ovf = 0;
+
+// 重写中断回调函数，不能重写HAL_TIM_PeriodElapsedCallback，因为已经被bsp占用了，但是底层没适配tim2
+void TIM2_IRQHandler(void)
+{
+    rt_interrupt_enter();
+
+    if (__HAL_TIM_GET_FLAG(&htim2, TIM_FLAG_UPDATE) != RESET)
+    {
+        if (__HAL_TIM_GET_IT_SOURCE(&htim2, TIM_IT_UPDATE) != RESET)
+        {
+            __HAL_TIM_CLEAR_IT(&htim2, TIM_IT_UPDATE);
+            tim2_ovf++;
+        }
+    }
+
+    rt_interrupt_leave();
 }
 
 
+static void _spll_update(uint32_t delta_ticks) {
+    const double alpha = 0.1;
+    engine.ticks_per_sec = (1.0 - alpha) * engine.ticks_per_sec + alpha * (double)delta_ticks;
+}
+
+static inline uint64_t _read_tim2_ext_tick(uint32_t *ovf_out, uint32_t *cnt_out)
+{
+    uint32_t o1, o2, c;
+    do {
+        o1 = tim2_ovf;
+        c  = TIM2->CNT;
+        o2 = tim2_ovf;
+    } while (o1 != o2);
+
+    if (ovf_out) *ovf_out = o2;
+    if (cnt_out) *cnt_out = c;
+    return ((uint64_t)o2 << 32) | (uint64_t)c;
+}
+
 static void _update_pps_state_by_timeout(void *parameter)
 {
-    rt_tick_t now = rt_tick_get();
-    rt_tick_t elapsed = now - g_ts.last_pps_sw_tick;
-    uint32_t elapsed_ms = elapsed * 1000 / RT_TICK_PER_SECOND;
+    rt_base_t level = rt_hw_interrupt_disable();
 
-    switch (g_ts.pps_state) {
+    uint32_t ovf_now, cnt_now;
+    uint64_t now_ext  = _read_tim2_ext_tick(&ovf_now, &cnt_now);
+    uint64_t last_ext = ((uint64_t)engine.last_pps_ovf << 32) | engine.last_pps_tick;
+
+    uint64_t elapsed_ticks = now_ext - last_ext;
+    uint32_t elapsed_s = (uint32_t)((double)elapsed_ticks / engine.ticks_per_sec);
+
+    switch (engine.state)
+    {
     case PPS_STATE_ACQUIRING:
-        if (elapsed_ms > 30000) {  /* 30秒无PPS */
-            g_ts.pps_state = PPS_STATE_FREERUN;
-            g_ts.pps_valid_cnt = 0;
-        }
+        if (elapsed_s > PPS_ACQUIRING_TIMEOUT) engine.state = PPS_STATE_FREERUN;
         break;
-
-    case PPS_STATE_LOCKED:
-        if (elapsed_ms > 1500) {  /* 1.5秒无PPS */
-            g_ts.pps_state = PPS_STATE_HOLDOVER;
-            g_ts.pps_valid_cnt = 0;
-        }
-        break;
-
     case PPS_STATE_HOLDOVER:
-        if (elapsed_ms > 180000) {  /* 180秒无有效PPS */
-            g_ts.pps_state = PPS_STATE_FREERUN;
-        }
+        if (elapsed_s > PPS_HOLDOVER_TIMEOUT) engine.state = PPS_STATE_FREERUN;
         break;
-
-    case PPS_STATE_FREERUN:
-    case PPS_STATE_INIT:
+    case PPS_STATE_LOCKED:
+        if (elapsed_s > PPS_LOCKED_TIMEOUT) engine.state = PPS_STATE_HOLDOVER;
+        break;
+    default:
         break;
     }
+
+    rt_hw_interrupt_enable(level);
 }
 
 /**
@@ -131,73 +156,68 @@ static void _pps_timer_deinit(void)
 
 void ts_pps_irq_handler(void *args)
 {
-    uint32_t now_hw = TS_HW_TIMER->CNT;
-    rt_tick_t now_sw = rt_tick_get();
+    uint32_t now = TS_HW_TIMER->CNT;
 
-    uint32_t delta_hw;
-    if (now_hw >= g_ts.last_pps_hw_tick) {
-        delta_hw = now_hw - g_ts.last_pps_hw_tick;
-    } else {
-        delta_hw = (0xFFFFFFFF - g_ts.last_pps_hw_tick) + now_hw + 1;
-    }
+    uint32_t ovf_now, cnt_now;
+    uint64_t now_ext = _read_tim2_ext_tick(&ovf_now, &cnt_now);
+
+    uint64_t last_ext = ((uint64_t)engine.last_pps_ovf << 32) | engine.last_pps_tick;
+    uint64_t delta_tick = now_ext - last_ext;
 
     /* 判断PPS脉冲是否有效（间隔在标称值±10%内） */
     uint32_t nominal = (uint32_t)TS_TICKS_PER_SEC_NOMINAL;
-    int is_valid_pulse = (delta_hw > (uint32_t)(nominal * 0.9)) &&
-                         (delta_hw < (uint32_t)(nominal * 1.1));
+    int is_valid_pulse = (delta_tick > (uint32_t)(nominal * 0.9)) &&
+                         (delta_tick < (uint32_t)(nominal * 1.1));
 
-    g_ts.last_pps_hw_tick = now_hw;
-    g_ts.last_pps_sw_tick = now_sw;
+    engine.last_pps_tick = now;
+    engine.last_pps_ovf = ovf_now;
+    if (is_valid_pulse && engine.system_base_sec != 0)
+    {
+        engine.system_base_sec++;
+    }
 
-    switch (g_ts.pps_state) {
+    switch (engine.state) {
 
         case PPS_STATE_INIT:
-            g_ts.pps_valid_cnt = 0;
-            g_ts.ticks_per_sec = TS_TICKS_PER_SEC_NOMINAL;
-            if (g_ts.ref_source != TS_REF_NONE) {
-                g_ts.pps_state = PPS_STATE_ACQUIRING;
-            }
+            acquiring_pps_cnt = 0;
+            engine.state = PPS_STATE_ACQUIRING;
             break;
 
         case PPS_STATE_ACQUIRING:
-            if (is_valid_pulse) {
-                    g_ts.pps_valid_cnt++;
-
-                    if (g_ts.pps_valid_cnt >= PPS_ACQ_VALID_COUNT) {
-                        g_ts.pps_state = PPS_STATE_LOCKED;
-                    }
-            } else {
-                g_ts.pps_valid_cnt = 0;
+            if(is_valid_pulse){
+                acquiring_pps_cnt++;
+            }
+            else{
+                acquiring_pps_cnt = 0;
             }
 
-            break;
-
-        case PPS_STATE_LOCKED:
-            if (is_valid_pulse) {
-                _spll_update(delta_hw);
-                g_ts.base_utc_sec++;
-            } else {
-                g_ts.pps_state = PPS_STATE_HOLDOVER;
+            if(acquiring_pps_cnt >= 5){
+                engine.state = PPS_STATE_LOCKED;
             }
             break;
 
         case PPS_STATE_HOLDOVER:
-            if (is_valid_pulse) {
-                g_ts.pps_state = PPS_STATE_LOCKED;
-                g_ts.base_utc_sec++;// 仅在locked状态下自增，然后使用nmea中的定时信息来对表
+            acquiring_pps_cnt = 0;
+            engine.state = PPS_STATE_ACQUIRING;
+            break;
+
+        case PPS_STATE_LOCKED:
+            if(!is_valid_pulse){
+                engine.state = PPS_STATE_HOLDOVER;
+            }
+            else{
+                _spll_update(delta_tick);
             }
 
             break;
 
+
         case PPS_STATE_FREERUN:
-            if (is_valid_pulse && g_ts.ref_source != TS_REF_NONE) {
-                g_ts.pps_state = PPS_STATE_ACQUIRING;
-                g_ts.pps_valid_cnt = 1;
-            }
+            engine.state = PPS_STATE_ACQUIRING;
             break;
 
         default:
-            g_ts.pps_state = PPS_STATE_INIT;
+            engine.state = PPS_STATE_INIT;
             break;
     }
 }
@@ -206,19 +226,24 @@ void ts_get_time(Timestamp_t *ts)
 {
     rt_base_t level = rt_hw_interrupt_disable();
 
-    uint32_t now_hw = TS_HW_TIMER->CNT;
+    uint32_t ovf_now, cnt_now;
+    uint64_t now_ext = _read_tim2_ext_tick(&ovf_now, &cnt_now);
 
-    uint32_t delta_hw;
-    if (now_hw >= g_ts.last_pps_hw_tick) {
-        delta_hw = now_hw - g_ts.last_pps_hw_tick;
-    } else {
-        delta_hw = (0xFFFFFFFF - g_ts.last_pps_hw_tick) + now_hw + 1;
+    uint64_t last_ext = ((uint64_t)engine.last_pps_ovf << 32) | engine.last_pps_tick;
+    uint64_t elapsed_ticks = now_ext - last_ext;
+
+    double elapsed_s = (double)elapsed_ticks / engine.ticks_per_sec;
+    uint32_t sec_add = (uint32_t)elapsed_s;
+    uint32_t usec    = (uint32_t)((elapsed_s - (double)sec_add) * 1000000.0 + 0.5);
+
+    ts->sec  = engine.system_base_sec + sec_add;
+    if(usec >= 1000000){
+        ts->sec += 1;
+        ts->usec = usec - 1000000;
     }
-
-    uint64_t elapsed_us = (uint64_t)((double)delta_hw * 1000000.0 / g_ts.ticks_per_sec);
-
-    ts->sec  = (uint32_t)(g_ts.base_utc_sec + (time_t)(elapsed_us / 1000000ULL));
-    ts->usec = (uint32_t)(elapsed_us % 1000000ULL);
+    else{
+        ts->usec = usec;
+    }
 
     rt_hw_interrupt_enable(level);
 }
@@ -244,26 +269,20 @@ void ts_get_calendar_time(sys_calendar_time_t *cal) {
 
 /* NMEA 校准  */
 void ts_correct_time_by_nmea(time_t utc_sec) {
-    uint32_t now_hw = TS_HW_TIMER->CNT;
+    uint32_t now = TS_HW_TIMER->CNT;
 
-    if (now_hw - g_ts.last_pps_hw_tick > 1000000 * 1.2) {
+    if (now - engine.last_pps_tick > 1000000 * 1.2) {
         rt_kprintf("[TS] The NMEA timestamp seems outdated: %d\n", utc_sec);
         return;
     }
 
     rt_base_t level = rt_hw_interrupt_disable();
 
-    time_t diff = g_ts.base_utc_sec - utc_sec;
-    time_t abs_diff = (diff < 0) ? -diff : diff;
-
-    if (abs_diff > 1) {
-        g_ts.base_utc_sec = utc_sec;
+    if (engine.system_base_sec != utc_sec) {
+        engine.system_base_sec = utc_sec;
         rt_kprintf("[TS] NMEA Corrected Base Sec: %d\n", utc_sec);
     }
 
-    if (g_ts.ref_source == TS_REF_NONE) {
-        g_ts.ref_source = TS_REF_GNSS_PPS;
-    }
     rt_hw_interrupt_enable(level);
 }
 
@@ -278,27 +297,28 @@ void ts_correct_time_by_ntp_offset_us(int64_t offset_us)
 
     int64_t target_sec  = target_us / 1000000LL;
     int64_t target_usec = target_us % 1000000LL;
-    if (target_usec < 0) { target_sec -= 1; target_usec += 1000000LL; }
+    while (target_usec < 0) { target_sec -= 1; target_usec += 1000000LL; }
 
-    int64_t abs_off_us = offset_us < 0 ? -offset_us : offset_us;
-    if (abs_off_us <= TS_NTP_SYNC_THRESHOLD_US) return;
+    if (target_sec < 0) { target_sec = 0; target_usec = 0; }
 
     rt_base_t level = rt_hw_interrupt_disable();
 
-    if (g_ts.pps_state != PPS_STATE_LOCKED && g_ts.pps_state != PPS_STATE_HOLDOVER) {
-        rt_kprintf("[TS] NTP Sync (Offset %+lld us). PPS State: %d\n",
-                   (long long)offset_us, g_ts.pps_state);
+    uint32_t ovf_now, cnt_now;
+    uint64_t now_ext = _read_tim2_ext_tick(&ovf_now, &cnt_now);
+    uint32_t tps = (uint32_t)(engine.ticks_per_sec + 0.5);
+    uint64_t ticks_back = ((uint64_t)target_usec * (uint64_t)tps + 500000ULL) / 1000000ULL;
 
-        uint32_t now_tick = TS_HW_TIMER->CNT;
-        g_ts.base_utc_sec = (uint32_t)target_sec;
-        g_ts.ref_source   = TS_REF_NTP;
-
-        double ticks_back_d = (double)target_usec * g_ts.ticks_per_sec / 1000000.0;
-        uint32_t ticks_back = (uint32_t)(ticks_back_d + 0.5);
-
-        g_ts.last_pps_hw_tick = now_tick - ticks_back;
-        g_ts.last_pps_sw_tick = rt_tick_get();
+    if (ticks_back >= (uint64_t)tps)
+    {
+        ticks_back = 0;
+        target_sec += 1;
+        target_usec = 0;
     }
+    uint64_t ref_ext = (ticks_back <= now_ext) ? (now_ext - ticks_back) : 0;
+
+    engine.system_base_sec = (uint32_t)target_sec;
+    engine.last_pps_ovf    = (uint32_t)(ref_ext >> 32);
+    engine.last_pps_tick   = (uint32_t)(ref_ext & 0xFFFFFFFFU);
 
     rt_hw_interrupt_enable(level);
 }
@@ -312,13 +332,10 @@ int time_service_init(void) {
     rt_pin_write(BSP_RFMODPWR_EN_PIN,PIN_HIGH);
     rt_pin_write(BSP_GNSSPWR_EN_PIN,PIN_HIGH);
 
-    if (HAL_TIM_Base_Start(&htim2) != HAL_OK) {
-            rt_kprintf("[Time] Error: TIM2 start failed!\n");
-            return -RT_ERROR;
-        }
-
-    __HAL_TIM_SET_AUTORELOAD(&htim2, 0xFFFFFFFF);
-
+    if (HAL_TIM_Base_Start_IT(&htim2) != HAL_OK) {
+        rt_kprintf("[Time] Error: TIM2 start_it failed!\n");
+        return -RT_ERROR;
+    }
 
     if (_pps_timer_init() != 0) {
         rt_kprintf("[TS] Timer init failed\n");
@@ -334,3 +351,11 @@ int time_service_init(void) {
 }
 
 INIT_APP_EXPORT(time_service_init);
+
+PPS_State_t get_system_state(void){
+    return engine.state;
+}
+
+double_t get_ticks_per_sec(void){
+    return engine.ticks_per_sec;
+}

@@ -19,8 +19,9 @@
 #define PPS_VALID_TOLERANCE_US    100
 
 #define PPS_ACQ_VALID_COUNT              5       /* LOCKED 所需连续有效次数 */
-#define PPS_LOSS_SHORT_TIMEOUT           30      /* LOCKED -> HOLDOVER (30s) */
-#define PPS_LOSS_LONG_TIMEOUT            360     /* HOLDOVER -> FREERUN (360s) */
+#define PPS_LOCKED_TIMEOUT           30      /* LOCKED -> HOLDOVER*/
+#define PPS_HOLDOVER_TIMEOUT            360     /* HOLDOVER -> FREERUN*/
+#define PPS_ACQUIRING_TIMEOUT            360     /* ACQUIRING -> FREERUN*/
 
 typedef struct{
     uint32_t       sec;
@@ -45,13 +46,6 @@ typedef enum {
     PPS_STATE_FREERUN
 } PPS_State_t;
 
-typedef enum
-{
-    TS_REF_NONE = 0,
-    TS_REF_GNSS_PPS,
-    TS_REF_NTP,
-    TS_REF_NMEA
-} ts_ref_source_t;
 
 /* API */
 int time_service_init(void);
@@ -61,5 +55,11 @@ void ts_get_calendar_time(sys_calendar_time_t *cal);
 void ts_correct_time_by_nmea(time_t utc_sec);
 void ts_correct_time_by_ntp_offset_us(int64_t offset_us);
 
+PPS_State_t get_system_state(void);
+double get_ticks_per_sec(void);
+
+int   gnss_get_fix_quality(void);
+int   gnss_get_satellites_used(void);
+float gnss_get_hdop(void);
 
 #endif /* APPLICATIONS_TIME_SERVICE_H_ */
