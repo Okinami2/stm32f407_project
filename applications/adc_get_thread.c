@@ -158,6 +158,7 @@ static void adc_get_thread_entry(void *parameter)
                         }
 
                         /* 在这里测试采集数据情况 [0]代表通道0
+                        */
                         int a = (int)p_dest_channels[0][batch_index];
                         int b = (int)(p_dest_channels[0][batch_index] - a) * 1000000;
                         if(b<0){
@@ -167,7 +168,6 @@ static void adc_get_thread_entry(void *parameter)
                             rt_kprintf("ch0: %d.%d \n",a,b);
                         }
 
-                        */
                         batch_index++;
 
                         if (batch_index % BATCH_SIZE == 0) {

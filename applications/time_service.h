@@ -57,6 +57,9 @@ void ts_correct_time_by_ntp_offset_us(int64_t offset_us);
 
 PPS_State_t get_system_state(void);
 double get_ticks_per_sec(void);
+uint32_t get_system_base_sec(void);
+
+uint32_t get_last_pps_tick(void);
 
 int   gnss_get_fix_quality(void);
 int   gnss_get_satellites_used(void);

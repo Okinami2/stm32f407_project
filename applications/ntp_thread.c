@@ -217,4 +217,4 @@ static int ntp_thread_init(void)
 
     return RT_EOK;
 }
-INIT_APP_EXPORT(ntp_thread_init);
+//INIT_APP_EXPORT(ntp_thread_init);

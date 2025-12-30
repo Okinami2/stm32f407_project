@@ -14,7 +14,6 @@
  */
 
 #include <drivers/spi.h>
-#include "sd_spi_switch.h"
 
 #define DBG_TAG    "spi.core"
 #define DBG_LVL    DBG_INFO
@@ -508,8 +507,6 @@ rt_err_t rt_spi_take(struct rt_spi_device *device)
     rt_ssize_t result;
     struct rt_spi_message message;
 
-    //sdnand 和 spi3 复用
-    ts_spi_bus_claim();
 
     RT_ASSERT(device != RT_NULL);
     RT_ASSERT(device->bus != RT_NULL);
@@ -531,7 +528,6 @@ rt_err_t rt_spi_release(struct rt_spi_device *device)
     rt_ssize_t result;
     struct rt_spi_message message;
 
-    ts_spi_bus_release();
 
     RT_ASSERT(device != RT_NULL);
     RT_ASSERT(device->bus != RT_NULL);

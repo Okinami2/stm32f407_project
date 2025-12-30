@@ -137,47 +137,45 @@ static int parse_rmc_time(const char *nmea_line, time_t *out_timestamp)
 
     *out_timestamp = timegm(&t);
 
-    if (status_ptr && *status_ptr == 'V') {
-        //rt_kprintf("RMC: GPS fix invalid, time may be inaccurate\n");
+    if (!status_ptr || *status_ptr != 'A') {
         return -1;
     }
 
     return 0;
 }
 
-static int parse_gga_sat_used(const char *nmea_line, int *fix_quality, int *sat_used,float *hdop)
+// GGA 格式: $GNGGA,UTC,Latitude,N/S,Longitude,E/W,Position Fix Indicator,Satellites Used,HDOP,MSL Altitude,AltUnit,GeoSep,GeoSepUnit...
+// 字段索引:  0   1   2        3   4         5   6                      7               8    9   10       11      12
+static int parse_gga_sat_used(const char *nmea_line, int *fix_quality, int *sat_used, float *hdop)
 {
-
-    // GGA 格式: $GNGGA,UTC,Latitude,N/S,Longitude,E/W,Position Fix Indicator,Satellites Used,HDOP,MSL Altitude,AltUnit,GeoSep,GeoSepUnit...
-    // 字段索引:  0   1   2        3   4         5   6                      7               8    9   10       11      12
     const char *fields[20] = {0};
     int field_idx = 0;
     const char *p = nmea_line;
+
     while (*p && *p != ',') p++;
     if (*p != ',') return -1;
-    while (*p && *p != '*' && *p != '\r' && *p != '\n' && field_idx < 15)
+
+    while (*p && *p != '*' && *p != '\r' && *p != '\n' && field_idx < 20)
     {
         if (*p == ',') {
             p++;
             fields[field_idx++] = p;
-            while (*p && *p != ',' && *p != '*' && *p != '\r' && *p != '\n') {
-                p++;
-            }
+            while (*p && *p != ',' && *p != '*' && *p != '\r' && *p != '\n') p++;
         } else {
             p++;
         }
+
+        if (field_idx >= 8) break;   // 只要到HDOP就够了
     }
 
-    if (field_idx < 15) {
-        return -1;
-    }
+    if (field_idx < 8) return -1;
 
-    *fix_quality = atoi(fields[5]);      // fix quality
-    *sat_used = atoi(fields[6]);         // satellites used
-    *hdop = atof(fields[7]);             // HDOP
+    *fix_quality = (fields[5] && *fields[5]) ? atoi(fields[5]) : 0;
+    *sat_used    = (fields[6] && *fields[6]) ? atoi(fields[6]) : 0;
+    *hdop        = (fields[7] && *fields[7]) ? (float)atof(fields[7]) : 99.9f;
+
     return 0;
 }
-
 
 
 void gnss_uart_suspend(void)
@@ -240,6 +238,7 @@ static void gnss_thread_entry(void *parameter)
                         }
                     }
                     else if(rt_strstr(line_buffer, "GGA")){
+                        // rt_kprintf("GGA: %s \n",line_buffer);
                         int fq, used;
                         float hdop;
                         if (parse_gga_sat_used(line_buffer, &fq, &used,&hdop) == 0) {

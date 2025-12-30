@@ -347,6 +347,10 @@ int time_service_init(void) {
     rt_pin_attach_irq(GET_PIN(G, 2), PIN_IRQ_MODE_RISING, ts_pps_irq_handler, RT_NULL);
     rt_pin_irq_enable(GET_PIN(G, 2), PIN_IRQ_ENABLE);
 
+    rt_thread_mdelay(100);
+    engine.state = PPS_STATE_INIT;
+    engine.last_pps_tick = 0;
+
     return 0;
 }
 
@@ -356,6 +360,15 @@ PPS_State_t get_system_state(void){
     return engine.state;
 }
 
-double_t get_ticks_per_sec(void){
+double get_ticks_per_sec(void){
     return engine.ticks_per_sec;
 }
+
+uint32_t get_system_base_sec(void){
+    return engine.system_base_sec;
+}
+
+uint32_t get_last_pps_tick(void){
+    return engine.last_pps_tick;
+}
+

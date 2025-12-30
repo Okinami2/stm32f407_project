@@ -498,6 +498,14 @@ static int finsh_cmd_config(int argc, char **argv)
 
         return RT_EOK;
     }
+    // 临时调试gnss状态机使用
+    else if(strcmp(argv[1], "show_pps") == 0){
+        uint32_t base_utc = get_system_base_sec();
+        uint32_t pps_tick = get_last_pps_tick();
+        rt_kprintf("now, the sys_base_utc=%d, record pps_tick=%d\n",base_utc,pps_tick);
+
+        return RT_EOK;
+    }
 
     rt_kprintf("unknown subcommand\n");
     return -RT_ERROR;

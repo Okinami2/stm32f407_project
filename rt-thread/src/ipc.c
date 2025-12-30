@@ -1528,6 +1528,7 @@ static rt_err_t _rt_mutex_take(rt_mutex_t mutex, rt_int32_t timeout, int suspend
 
 rt_err_t rt_mutex_take(rt_mutex_t mutex, rt_int32_t time)
 {
+
     return _rt_mutex_take(mutex, time, RT_UNINTERRUPTIBLE);
 }
 RTM_EXPORT(rt_mutex_take);

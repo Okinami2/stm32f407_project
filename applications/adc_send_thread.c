@@ -32,6 +32,7 @@
 
 #define SERVER_IP        "192.168.137.1"
 #define SERVER_PORT      9001
+#define RECONNECT_INTERVAL_MS  5000
 
 #define PACKET_DATA_SIZE        (BATCH_SIZE * (8 * sizeof(float)) + sizeof(sys_calendar_time_t) + sizeof(rt_uint8_t))
 
@@ -62,7 +63,7 @@ static struct rt_mutex cache_lock; /* 保护索引文件和内存缓冲 */
 static struct rt_mutex net_lock;   /* 保护 sock_fd 发送 */
 
 #define CACHE_FLUSH_INTERVAL_TICKS   (rt_tick_from_millisecond(5000)) /* 5s */
-#define RAM_CACHE_SIZE               (50U * 1024U)                    /* 50KB */
+#define RAM_CACHE_SIZE               (32U * 1024U)                    /* 32KB */
 
 #define PACKET_FULL_LEN   (PACKET_DATA_SIZE + 4)
 
@@ -101,8 +102,20 @@ static void tcp_close_socket(void)
  */
 static int tcp_connect_to_server(void)
 {
+
     struct sockaddr_in server_addr;
     struct timeval timeout;
+
+    static rt_tick_t last_try_tick = 0;
+    rt_tick_t now_tick = rt_tick_get();
+
+    if ((now_tick - last_try_tick) < rt_tick_from_millisecond(RECONNECT_INTERVAL_MS))
+    {
+        return -1;
+    }
+
+    last_try_tick = now_tick;
+
 
     if (sock_fd >= 0)
     {
@@ -394,6 +407,12 @@ static void send_to_server_thread_entry(void *parameter)
 
     while (1)
     {
+
+        if (sock_fd < 0)
+        {
+            tcp_connect_to_server();
+        }
+
         if (rt_sem_take(adc_get_done_sem, rt_tick_from_millisecond(1000)) == RT_EOK)
         {
             if (receive_buff_flag == true) {
@@ -453,12 +472,20 @@ static void adc_resend_thread_entry(void *parameter)
         if (sock_fd < 0 || !is_network_link_up()) continue;
 
         rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
+        ts_spi_bus_claim();
         if (load_index_locked(&idx) < 0) {
+            ts_spi_bus_release();
             rt_mutex_release(&cache_lock);
             continue;
         }
+        /* 调试是否重发用
+        rt_kprintf("[RESEND] Found cache: r(%d,%u) -> w(%d,%u)\n",
+                    idx.read_file_idx, idx.read_off,
+                    idx.write_file_idx, idx.write_off);
+                    */
 
         if (idx.read_file_idx == idx.write_file_idx && idx.read_off == idx.write_off) {
+            ts_spi_bus_release();
             rt_mutex_release(&cache_lock);
             continue;
         }
@@ -482,6 +509,7 @@ static void adc_resend_thread_entry(void *parameter)
             if (tcp_send_packet(read_buf, PACKET_FULL_LEN) == PACKET_FULL_LEN)
             {
                 rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
+                ts_spi_bus_claim();
                 idx.read_off += PACKET_FULL_LEN;
                 if (idx.read_off >= CACHE_SEG_SIZE)
                 {
@@ -489,6 +517,8 @@ static void adc_resend_thread_entry(void *parameter)
                     idx.read_file_idx = (idx.read_file_idx + 1) % CACHE_FILE_COUNT;
                 }
                 save_index_locked(&idx);
+
+                ts_spi_bus_release();
                 rt_mutex_release(&cache_lock);
             }
             else
