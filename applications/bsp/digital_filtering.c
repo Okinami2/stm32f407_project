@@ -12,7 +12,7 @@ static int _compare_int32(const void* a, const void* b) {
     return 0;
 }
 
-//Welford's algorithm
+/* Welford's online algorithm for variance calculation */
 static void _update_online_stats(OnlineStats* stats, rt_int32_t new_value) {
     if (NUM_MAX_HISOTRY > 0 && stats->count >= NUM_MAX_HISOTRY) {
             double delta = (double)new_value - stats->mean;
@@ -28,7 +28,7 @@ static void _update_online_stats(OnlineStats* stats, rt_int32_t new_value) {
         }
 }
 
-//向历史数据缓冲区添加新数据
+/* Add new value to history buffer */
 static void _add_to_history(ChannelProcessor* channel, rt_int32_t value) {
     channel->head_index = (channel->head_index + 1) % HISTORY_WINDOW_SIZE;
     channel->history[channel->head_index] = value;
@@ -44,7 +44,7 @@ void processor_init(DataProcessor* processor, rt_int32_t limit_min, rt_int32_t l
 
     memset(processor, 0, sizeof(DataProcessor));
 
-    // 保存配置
+    /* Save configuration */
     processor->limit_min = limit_min;
     processor->limit_max = limit_max;
     processor->gradient_threshold = gradient_threshold;
@@ -69,7 +69,7 @@ void adc_data_filtering(DataProcessor* processor,
         rt_int32_t current_data = raw_adc_data[ch];
         rt_bool_t is_outlier = RT_FALSE;
 
-        // 异常值
+        /* Outlier detection */
         if (outlier_method == OUTLIER_DETECT_LIMIT || outlier_method == OUTLIER_DETECT_ALL_SEQUENTIAL) {
             if (current_data < processor->limit_min || current_data > processor->limit_max) {
                 is_outlier = RT_TRUE;
@@ -97,7 +97,7 @@ void adc_data_filtering(DataProcessor* processor,
 
         rt_int32_t value_for_filter;
         if (is_outlier) {
-            value_for_filter = channel->last_valid_value; // 使用上一个有效值
+            value_for_filter = channel->last_valid_value; /* Use last valid value */
         } else {
             value_for_filter = current_data;
             channel->last_valid_value = current_data;
@@ -109,7 +109,7 @@ void adc_data_filtering(DataProcessor* processor,
         rt_int32_t filtered_value = value_for_filter;
         int hist_count = channel->buffer_full ? HISTORY_WINDOW_SIZE : (channel->head_index + 1);
 
-        // 滤波
+        /* Apply filter */
         switch (filter_type) {
             case FILTER_TYPE_MOVING_AVERAGE: {
                 long long sum = 0;

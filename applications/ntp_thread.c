@@ -15,7 +15,8 @@
 #include <sys/time.h>
 #include <math.h>
 #include <string.h>
-#include "time_service.h"
+#include "bsp/time_service.h"
+#include "config_thread.h"
 
 #define DBG_TAG "ntp_task"
 #define DBG_LVL DBG_INFO
@@ -27,7 +28,7 @@
 #define NTP_ITERATIONS      8
 #define NTP_INTERVAL_MS     100
 #define NTP_TIMEOUT_MS      2000
-#define DEFAULT_SYNC_INTERVAL_MINUTES 60
+#define DEFAULT_SYNC_INTERVAL_SECONDS 60*60
 
 typedef struct __attribute__((packed)) {
     uint8_t  li_vn_mode;
@@ -73,7 +74,7 @@ static int ntp_request(int sock, struct sockaddr_in *addr,
         if (ret < 0)
             return -1;
 
-        /* recvfrom 会在超时后自动返回（通过 setsockopt 设置） */
+        /* recvfrom auto-returns on timeout (set via setsockopt) */
         ret = recvfrom(sock, &pkt, sizeof(pkt), 0, NULL, NULL);
         if (ret < 48)
             return -1;
@@ -101,6 +102,10 @@ static int cmp_delay(const void *a, const void *b)
     return 0;
 }
 
+/**
+ * @brief Perform NTP time synchronization
+ * @return 0 on success, -1 on failure
+ */
 int ntp_sync(void)
 {
     int sock;
@@ -161,7 +166,7 @@ int ntp_sync(void)
     int32_t off_usec = (int32_t)(avg_offset % 1000000LL);
     if (off_usec < 0) { off_sec -= 1; off_usec += 1000000; }
 
-    // 计算标准差（stddev）
+    /* Calculate standard deviation */
     double stddev = 0;
     for (i = 0; i < use_count; i++)
     {
@@ -169,28 +174,48 @@ int ntp_sync(void)
         stddev += diff * diff;
     }
     stddev = sqrt(stddev / use_count);
+    int stddev_i = (int)stddev;
+    int stddev_d = abs((int)((stddev - stddev_i) * 1000));
 
-    rt_kprintf("NTP: final offset = %lld us (delay=%lld us) stddev = %.2f us\n",
-               (long long)avg_offset, (long long)samples[0][1], stddev);
+    rt_kprintf("NTP: final offset = %lld us (delay=%lld us) stddev = %d.%05d us\n",
+               (long long)avg_offset, (long long)samples[0][1], stddev_i,stddev_d);
 
     ts_correct_time_by_ntp_offset_us(avg_offset);
 
     return 0;
 }
 
+/**
+ * @brief NTP sync thread entry
+ * @param parameter Unused
+ */
 static void ntp_sync_thread_entry(void *parameter)
 {
+    rt_tick_t last_update_tick = rt_tick_get();
+    rt_tick_t interval_ticks = RT_TICK_PER_SECOND * DEFAULT_SYNC_INTERVAL_SECONDS;
+
     rt_thread_mdelay(5000);
 
     while (1)
     {
-        if(ntp_sync() != 0){
+        config_update_msg_t msg;
+        rt_tick_t now = rt_tick_get();
+        rt_int32_t wait_ticks;
+
+        rt_tick_t elapsed = now - last_update_tick;
+        if (elapsed >= interval_ticks) {
+            wait_ticks = 0;
+        } else {
+            wait_ticks = interval_ticks - elapsed;
+        }
+
+        rt_mq_recv(config_ntp_update_notify, &msg, sizeof(msg), wait_ticks);
+
+        if (ntp_sync() == 0) {
+        } else {
             rt_kprintf("ntp sync failed. please check the network.\n");
         }
-        //rt_tick_t delay_tick = DEFAULT_SYNC_INTERVAL_MINUTES * 60 * RT_TICK_PER_SECOND;
-        rt_tick_t delay_tick = RT_TICK_PER_SECOND * 30;
-
-        rt_thread_delay(delay_tick);
+        last_update_tick = rt_tick_get();
     }
 }
 
@@ -217,4 +242,4 @@ static int ntp_thread_init(void)
 
     return RT_EOK;
 }
-//INIT_APP_EXPORT(ntp_thread_init);
+INIT_APP_EXPORT(ntp_thread_init);

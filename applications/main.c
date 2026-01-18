@@ -20,9 +20,9 @@
 #include "config_thread.h"
 #include "adc_get_thread.h"
 #include "adc_send_thread.h"
-#include "max40109_hal.h"
-#include "time_service.h"
-#include "sd_spi_switch.h"
+#include "bsp/max40109_hal.h"
+#include "bsp/time_service.h"
+#include "bsp/sd_spi_switch.h"
 
 #define DBG_TAG "main"
 #define DBG_LVL DBG_LOG
@@ -48,7 +48,7 @@ static void dump_cache_files(void)
 
     rt_kprintf("\n===== CACHE FILE DUMP =====\n");
 
-    /* 1. dump cache.idx 原始字节 */
+    /* 1. Dump cache.idx raw bytes */
     rt_uint8_t raw[sizeof(struct cache_index)] = {0};
 
     fd = open(CACHE_INDEX_PATH, O_RDONLY, 0);
@@ -68,7 +68,7 @@ static void dump_cache_files(void)
     }
     rt_kprintf("\n");
 
-    /* 2. 结构体方式解析 */
+    /* 2. Parse as structure */
     struct cache_index idx;
     rt_memcpy(&idx, raw, sizeof(idx));
 
@@ -79,7 +79,7 @@ static void dump_cache_files(void)
     rt_kprintf("  write_off      = %u\n", idx.write_off);
     rt_kprintf("  read_off       = %u\n", idx.read_off);
 
-    /* 3. cache_000.dat 文件大小 */
+    /* 3. cache_000.dat file size */
     fd = open(CACHE_DATA_PATH, O_RDONLY, 0);
     if (fd >= 0)
     {
@@ -137,7 +137,7 @@ int main(void)
 {
     int count = 1;
 
-    if(config_thread_init() != RT_EOK){//必须先初始化配置线程
+    if(config_thread_init() != RT_EOK){/* Must initialize config thread first */
         rt_kprintf("fail start config_thread\n");
     }
 
@@ -152,14 +152,16 @@ int main(void)
     if(adc_get_thread_start() != RT_EOK){
         rt_kprintf("fail start adc_get_thread\n");
     }
-    /*
+
+    /* Test code - temporarily disabled
     if(adc_send_to_server_start() != RT_EOK){
         rt_kprintf("fail start adc_send_thread\n");
     }
      */
 
-    //struct timeval sys_time;
-    //sys_calendar_time_t sys_cal;
+    /* Test code for time display*/
+    // struct timeval sys_time;
+    // sys_calendar_time_t sys_cal;
     while (count++)
     {
         //ts_get_time(&sys_time);
@@ -169,39 +171,39 @@ int main(void)
                            sys_cal.year, sys_cal.month, sys_cal.day,
                            sys_cal.hour, sys_cal.minute, sys_cal.second,
                            sys_cal.microsecond);
-*/
-        /* 读取max芯片测量电压值
         */
-        //int pressure = 0;
-        //max40109_read_pressure(0,&pressure);
-        //rt_kprintf("ch0: %d \n",pressure);
 
-        /* 卫星测试代码
+        /* Test code for reading MAX chip pressure
+        int pressure = 0;
+        max40109_read_pressure(0,&pressure);
+        rt_kprintf("ch0: %d \n",pressure);
+        */
 
+        /* Test code for GNSS
         int quality = gnss_get_fix_quality();
         int sats    = gnss_get_satellites_used();
         float hdop  = gnss_get_hdop();
 
         if (quality >= 1)
         {
-            rt_kprintf("[GNSS] 已定位 | 卫星数: %d | HDOP: %.2f (质量", sats, hdop);
-            if (hdop < 1.5f)      rt_kprintf("极好)\n");
-            else if (hdop < 2.0f) rt_kprintf("优秀)\n");
-            else if (hdop < 4.0f) rt_kprintf("一般)\n");
-            else                  rt_kprintf("较差)\n");
+            rt_kprintf("[GNSS] Located | Sats: %d | HDOP: %.2f (", sats, hdop);
+            if (hdop < 1.5f)      rt_kprintf("Excellent)\n");
+            else if (hdop < 2.0f) rt_kprintf("Good)\n");
+            else if (hdop < 4.0f) rt_kprintf("Fair)\n");
+            else                  rt_kprintf("Poor)\n");
         }
         else
         {
-            rt_kprintf("[GNSS] 未定位（Fix Quality = 0）\n");
+            rt_kprintf("[GNSS] No fix (Fix Quality = 0)\n");
         }
         PPS_State_t current_state = get_system_state();
         double cur_tick_per_sec = get_ticks_per_sec();
         uint32_t sec_int = (uint32_t)cur_tick_per_sec;
         uint32_t sec_f = (uint32_t)(cur_tick_per_sec - sec_int) * 100000;
         rt_kprintf("current_pps_stats: %d, current_tick_per_sec = %d.%d \n",current_state,sec_int,sec_f);
+        */
 
-*/
-        /*
+        /* Test code for SD card access
         ts_spi_bus_claim();
 
         ls("/");
@@ -209,8 +211,30 @@ int main(void)
 
         ts_spi_bus_release();
         */
+        double uncal_val = 0.0;
+        double cal_val = 0.0;
+        double ads_val = 0.0;
 
-        rt_thread_mdelay(5000);
+        max40109_read_pressure(0, &uncal_val, 0);
+        max40109_read_pressure(0, &cal_val, 1);
+        extern double get_tmp_ch0_press(void);
+        ads_val = get_tmp_ch0_press();
+
+        int a1 = (int)(uncal_val);
+        int a2 = (int)(cal_val);
+        int a3 = (int)(ads_val);
+        int b1,b2,b3;
+
+        if(a1>0) b1 = (int)((uncal_val - a1) * 1000);
+        else b1 = (int)((a1 - uncal_val) * 1000);
+        if(a2>0) b2 = (int)((cal_val - a2) * 1000);
+        else b2 = (int)((a2 - cal_val) * 1000);
+        if(a3>0) b3 = (int)((ads_val - a3) * 1000);
+        else b3 = (int)((a3 - ads_val) * 1000);
+
+        rt_kprintf("ch6: %d.%03d, %d.%03d, %d.%03d\n", a1, b1, a2, b2, a3, b3);
+
+        rt_thread_mdelay(1000);
 
     }
     return RT_EOK;

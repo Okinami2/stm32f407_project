@@ -17,6 +17,7 @@ typedef enum { MODE_SAFE_HIZ, MODE_GNSS, MODE_SD_SPI } mux_mode_t;
 static struct rt_mutex g_sd_spi_mux_mutex;
 static rt_bool_t g_sd_spi_mux_mutex_inited = RT_FALSE;
 
+/* Ensure mux mutex is initialized (thread-safe) */
 static void _ensure_mux_mutex_inited(void)
 {
     if (g_sd_spi_mux_mutex_inited) return;
@@ -30,6 +31,7 @@ static void _ensure_mux_mutex_inited(void)
     rt_hw_interrupt_enable(level);
 }
 
+/* Set GPIO mux mode */
 static void _set_mux_mode(mux_mode_t mode) {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
 

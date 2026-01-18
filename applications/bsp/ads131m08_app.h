@@ -15,16 +15,16 @@
 #include "digital_filtering.h"
 #include "config_thread.h"
 
-// ADC参考电压和满量程码值 (24位ADC)
+/* ADC reference voltage and full scale code (24-bit ADC) */
 #define ADC_VREF                1.2f
 #define ADC_FULL_SCALE_CODE     8388607.0f
-// S1: 应变灵敏度 (单位: V/uε)
+/* S1: Strain sensitivity (V/uε) */
 #define S1 (0.050f / 3000.0f)
-// ε0: 应变零点漂移 (单位: uε)
+/* ε0: Strain zero offset (uε) */
 #define STRAIN_ZERO (0.0f)
-// S2: 加速度灵敏度 (单位: V/mg)
+/* S2: Acceleration sensitivity (V/mg) */
 #define S2 (2.5f / 2000.0f)
-// a0: 加速度零点漂移 (单位: mg)
+/* a0: Acceleration zero offset (mg) */
 #define A_ZERO (2.5f)
 
 

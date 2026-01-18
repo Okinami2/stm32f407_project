@@ -30,23 +30,21 @@ static void adc_drdy_isr(void *args)
 }
 
 /**
- * @brief  向 ADS131M08 的单个寄存器写入数据
- *
- * @param  addr  要写入的寄存器的6位地址
- * @param  data  要写入的 16 位数据
- * @param  word_length  设置的传输位宽
- *
- * @return rt_bool_t - 成功返回 RT_TRUE, 失败返回 RT_FALSE
+ * @brief Write data to ADS131M08 register
+ * @param addr 6-bit register address
+ * @param data 16-bit data to write
+ * @param word_length Transfer bit width (16/24/32)
+ * @return RT_TRUE on success, RT_FALSE on failure
  */
 rt_bool_t adcRegisterWrite(rt_uint8_t addr, rt_uint16_t data,rt_uint8_t word_length)
 {
     rt_uint16_t command_word;
     rt_uint8_t tx_buffer[ADC_FRAME_WORD_COUNT * 4] = {0};
-    rt_uint8_t rx_buffer[ADC_FRAME_WORD_COUNT * 4] = {0}; // 用于接收响应
+    rt_uint8_t rx_buffer[ADC_FRAME_WORD_COUNT * 4] = {0}; /* Response buffer */
     rt_uint8_t count = 3;
 
-    // 构造 16 位的 WREG 命令字
-    // 格式: 011a aaaa a000 0000  (因为我们只写入1个寄存器, nnnnnn = 0)
+    /* Construct 16-bit WREG command word */
+    /* Format: 011a aaaa a000 0000 (single register write, nnnnnn = 0) */
     command_word = (0b011 << 13) | ((addr & 0x3F) << 7)|0x00;
 
     if(word_length == 16){
@@ -62,18 +60,18 @@ rt_bool_t adcRegisterWrite(rt_uint8_t addr, rt_uint16_t data,rt_uint8_t word_len
         LOG_D("UNEXCEPTED WORD LENGTH");
     }
 
-    tx_buffer[0] = (command_word >> 8) & 0xFF; // 命令高字节
-    tx_buffer[1] = command_word & 0xFF;        // 命令低字节
-    tx_buffer[count] = (data >> 8) & 0xFF;         // 数据高字节
-    tx_buffer[count + 1] = data & 0xFF;            // 数据低字节
+    tx_buffer[0] = (command_word >> 8) & 0xFF; /* Command high byte */
+    tx_buffer[1] = command_word & 0xFF;        /* Command low byte */
+    tx_buffer[count] = (data >> 8) & 0xFF;         /* Data high byte */
+    tx_buffer[count + 1] = data & 0xFF;            /* Data low byte */
 
-    //执行 SPI 传输
+    /* Execute SPI transfer */
     if (rt_spi_transfer(spi_dev, tx_buffer, rx_buffer, ADC_FRAME_WORD_COUNT * count) != ADC_FRAME_WORD_COUNT * count) {
         LOG_E("SPI write transfer to reg 0x%02X failed!", addr);
         return RT_FALSE;
     }
     /*
-    //验证芯片的响应，实际不用，否则切换字宽时会出错
+    // Verify chip response - disabled to avoid issues during word length switching
     if (rt_spi_transfer(spi_dev, tx_buffer, rx_buffer, ADC_FRAME_WORD_COUNT * count) != ADC_FRAME_WORD_COUNT * count) {
             LOG_E("SPI write transfer to reg 0x%02X failed!", addr);
             return RT_FALSE;
@@ -91,7 +89,7 @@ rt_bool_t adcRegisterWrite(rt_uint8_t addr, rt_uint16_t data,rt_uint8_t word_len
     }
 */
 
-    //时钟同步
+    /* Clock sync */
     rt_pin_write(BSP_nADC_SYNC_PIN, PIN_LOW);
     rt_hw_us_delay(10);
     rt_pin_write(BSP_nADC_SYNC_PIN, PIN_HIGH);
@@ -100,13 +98,11 @@ rt_bool_t adcRegisterWrite(rt_uint8_t addr, rt_uint16_t data,rt_uint8_t word_len
 
 
 /**
- * @brief  向 ADS131M08 的单个寄存器读取数据
- *
- * @param  addr  要读取的寄存器的 6位地址
- * @param  data  读取到的 16 位数据
- * @param  word_length  设置的传输位宽
- *
- * @return rt_bool_t - 成功返回 RT_TRUE, 失败返回 RT_FALSE
+ * @brief Read data from ADS131M08 register
+ * @param addr 6-bit register address
+ * @param data Pointer to store 16-bit data
+ * @param word_length Transfer bit width (16/24/32)
+ * @return RT_TRUE on success, RT_FALSE on failure
  */
 rt_bool_t adcRegisterRead(rt_uint8_t addr, rt_uint16_t *data,rt_uint8_t word_length)
 {
@@ -144,7 +140,9 @@ rt_bool_t adcRegisterRead(rt_uint8_t addr, rt_uint16_t *data,rt_uint8_t word_len
 
 
 /**
- * @brief 设置增益
+ * @brief Set ADC gain
+ * @param gain Gain value (1, 2, 4, 8, 16, 32, 64, 128)
+ * @return RT_EOK on success, error code on failure
  */
 rt_err_t ads131m08_set_gain(rt_uint16_t gain)
 {
@@ -193,11 +191,12 @@ rt_err_t ads131m08_enable_cannel(rt_uint8_t channel_code)
 
 
 /**
- * @brief 初始化ADS131M08芯片
+ * @brief Initialize ADS131M08 chip
+ * @return RT_EOK on success, error code on failure
  */
 rt_err_t ads131m08_init(void)
 {
-    /* 1. 硬件和SPI初始化 */
+    /* 1. Hardware and SPI initialization */
     spi_dev = (struct rt_spi_device *)rt_device_find(ADC_SPI_DEVICE_NAME);
     if (!spi_dev) return ADC_ERR_DEVICE_FIND;
     if (rt_device_open((rt_device_t)spi_dev, RT_DEVICE_FLAG_RDWR) != RT_EOK) return ADC_ERR_DEVICE_OPEN;
@@ -214,7 +213,7 @@ rt_err_t ads131m08_init(void)
         return -RT_ERROR;
     }
 
-    /* 2. 时钟, 复位, DRDY 检查 */
+    /* 2. Clock, reset, DRDY setup */
     rt_pin_mode(BSP_ADCCLK_EN_PIN, PIN_MODE_OUTPUT);
     rt_pin_mode(BSP_ADCCLK_BIT0_PIN, PIN_MODE_OUTPUT);
     rt_pin_mode(BSP_ADCCLK_BIT1_PIN, PIN_MODE_OUTPUT);
@@ -236,28 +235,27 @@ rt_err_t ads131m08_init(void)
     rt_hw_us_delay(5);
     rt_pin_write(BSP_nADC_SYNC_PIN, PIN_HIGH);
 
-    //时钟同步
+    /* Clock sync */
     rt_pin_write(BSP_nADC_SYNC_PIN, PIN_LOW);
     rt_hw_us_delay(10);
     rt_pin_write(BSP_nADC_SYNC_PIN, PIN_HIGH);
-    //空读一次
+    /* Dummy read */
     if (adcRegisterWrite(STATUS_ADDR, 0x0000, word_length) != RT_TRUE) {
        return ADC_ERR_REG_WRITE_MODE;
     }
 
-    // 配置 CLOCK 寄存器: 设置 OSR 和电源模式,使用4096调整底层采样频率为1ksps 1111_1111_0001_0110
+    /* Configure CLOCK register: Set OSR and power mode, 4096 for 1ksps at F_clkin=8196kHz */
     if (adcRegisterWrite(CLOCK_ADDR, 0xFF16, word_length) != RT_TRUE) {
         return ADC_ERR_REG_WRITE_CLK;
     }
-    // 配置增益寄存器: 设置为默认增益 1 (全零) 0000_0000_0000_0000
+    /* Configure gain registers: Set default gain to 1 */
     if (adcRegisterWrite(GAIN1_ADDR, 0x0000, word_length) != RT_TRUE) {
         return ADC_ERR_SET_GAIN;
     }
     if (adcRegisterWrite(GAIN2_ADDR, 0x0000, word_length) != RT_TRUE) {
         return ADC_ERR_SET_GAIN;
     }
-    //清除reset位                       0000_0001_0001_0000
-    //设置drdy管脚低脉冲模式  0000_0001_0001_0001
+    /* Clear reset bit, set DRDY low pulse mode */
     if (adcRegisterWrite(MODE_ADDR, 0X0115, word_length) != RT_TRUE) {
        return ADC_ERR_REG_WRITE_MODE;
     }
@@ -265,7 +263,7 @@ rt_err_t ads131m08_init(void)
     rt_pin_mode(BSP_nADC_DRDY_PIN,PIN_MODE_INPUT);
 
     rt_pin_attach_irq(BSP_nADC_DRDY_PIN, PIN_IRQ_MODE_FALLING, adc_drdy_isr, RT_NULL);
-    // 在真正开始读取数据前再使能中断
+    /* Disable IRQ until data read starts */
     rt_pin_irq_enable(BSP_nADC_DRDY_PIN, PIN_IRQ_DISABLE);
 
     LOG_I("ADS131M08 initialized successfully. Ready for data streaming.");
@@ -292,7 +290,7 @@ rt_err_t ads131m08_read_data_frame(rt_int32_t *buffer, rt_bool_t is_first_read)
     for (int i = 0; i < ADC_NUM_CHANNELS; i++) {
         int offset = (word_length / 8) * (i + 1);
 
-        buffer[i] = (rt_int32_t)(((rx_buf[offset] << 16) | (rx_buf[offset + 1] << 8) | rx_buf[offset + 2]) << 8) >> 8;
+        buffer[i] = (rt_int32_t)(((rx_buf[offset] << 16) | (rx_buf[offset + 1] << 8) | rx_buf[offset + 2]) << 8) >> 8; /* Sign extend */
     }
 
     rt_pin_irq_enable(BSP_nADC_DRDY_PIN, PIN_IRQ_ENABLE);

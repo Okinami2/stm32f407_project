@@ -12,27 +12,27 @@
 
 #include <rtthread.h>
 
-/* ================== 1. 引脚和设备名称定义 ================== */
+/* Pin and device name definitions */
 #define ADC_SPI_DEVICE_NAME     "spi20"
 
-/* ================== 5. HAL层错误码定义 ================== */
-#define ADC_EOK                  0   // 成功
-#define ADC_ERR_DEVICE_FIND     -1   // 找不到SPI设备
-#define ADC_ERR_DEVICE_OPEN     -2   // 打开设备失败
-#define ADC_ERR_DRDY_TIMEOUT    -3   // 等待DRDY高电平超时
-#define ADC_ERR_REG_WRITE_CLK   -4   // 写CLOCK寄存器失败
-#define ADC_ERR_REG_WRITE_MODE  -5   // 写MODE寄存器失败
-#define ADC_ERR_SET_GAIN        -6   // 设置增益失败
-#define ADC_ERR_REG_ENABLE_CH   -7   // 启用通道失败
+/* HAL layer error codes */
+#define ADC_EOK                  0   /* Success */
+#define ADC_ERR_DEVICE_FIND     -1   /* SPI device not found */
+#define ADC_ERR_DEVICE_OPEN     -2   /* Device open failed */
+#define ADC_ERR_DRDY_TIMEOUT    -3   /* DRDY high timeout */
+#define ADC_ERR_REG_WRITE_CLK   -4   /* CLOCK register write failed */
+#define ADC_ERR_REG_WRITE_MODE  -5   /* MODE register write failed */
+#define ADC_ERR_SET_GAIN        -6   /* Gain set failed */
+#define ADC_ERR_REG_ENABLE_CH   -7   /* Channel enable failed */
 
-/* ================== 2. ADS131M08寄存器地址 ================== */
+/* ADS131M08 register addresses */
 #define STATUS_ADDR             0x01
 
 
 #define CLOCK_ADDR              0x03
 #define ALL_CH_ENABLE_MASK      0xFF00
 #define OSR_1024_MASK           0x000C
-#define OSR_4096_MASK           0x0014 //在F_clkin=8196khz时，对应1ksps
+#define OSR_4096_MASK           0x0014 /* OSR=4096, 1ksps at F_clkin=8196kHz */
 #define PWR_HR_MASK             0x0002
 
 #define MODE_ADDR               0x02
@@ -47,7 +47,7 @@
 #define GAIN2_ADDR              0x05
 
 
-/* ================== 4. HAL层配置 ================== */
+/* HAL layer configuration */
 #define CLK_SEL_8_192_MHZ       1
 #define CLK_SEL_4_096_MHZ       2
 #define CLK_SEL_2_048_MHZ       3
@@ -58,7 +58,7 @@
 
 extern rt_sem_t drdy_sem;
 
-/* ================== 5. 函数声明 ================== */
+/* Function declarations */
 rt_err_t ads131m08_init(void);
 rt_err_t ads131m08_read_data_frame(rt_int32_t *buffer, rt_bool_t is_first_read);
 rt_bool_t adcRegisterWrite(rt_uint8_t addr, rt_uint16_t data,rt_uint8_t word_length);

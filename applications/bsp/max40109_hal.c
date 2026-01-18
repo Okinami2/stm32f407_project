@@ -20,7 +20,7 @@
 
 static struct rt_i2c_bus_device *i2c_bus;
 
-/* 因为前端芯片没有全部焊上，先用0代替
+/* Alert pins - only channel 0 populated, others set to 0
 static const rt_base_t alert_pins[NUM_MAX_CHIPS] = {
     BSP_nCH0_ALERT_PIN,
     BSP_nCH1_ALERT_PIN,
@@ -43,7 +43,7 @@ static const rt_base_t alert_pins[NUM_MAX_CHIPS] = {
     0
 };
 
-static struct rt_mutex i2c_mux_lock; // 避免同时读写操作
+static struct rt_mutex i2c_mux_lock; /* Prevent concurrent I2C operations */
 static rt_sem_t alert_sem = RT_NULL;
 static volatile rt_uint8_t g_triggered_channels_mask = 0;
 
@@ -67,7 +67,8 @@ static void alert_irq_handler(void *args)
 
 
 /**
- * @brief 选片逻辑：控制 Mux 切换
+ * @brief Select MAX40109 chip via I2C mux
+ * @param chip_index Chip index (0-7)
  */
 static void _select_max_chip(rt_uint8_t chip_index)
 {
@@ -81,7 +82,11 @@ static void _select_max_chip(rt_uint8_t chip_index)
 }
 
 /**
- * @brief 内部统一传输接口
+ * @brief Internal unified I2C transfer interface
+ * @param chip_idx Target chip index
+ * @param msgs I2C message array
+ * @param num Number of messages
+ * @return RT_EOK on success, error code on failure
  */
 static rt_err_t _max40109_transfer(rt_uint8_t chip_idx, struct rt_i2c_msg *msgs, rt_uint32_t num)
 {
@@ -94,7 +99,7 @@ static rt_err_t _max40109_transfer(rt_uint8_t chip_idx, struct rt_i2c_msg *msgs,
 
     _select_max_chip(chip_idx);
 
-    /* 多 msgs 会自动触发 Repeated Start */
+    /* Multiple msgs trigger Repeated Start automatically */
     if (rt_i2c_transfer(i2c_bus, msgs, num) == num)
     {
         res = RT_EOK;
@@ -109,8 +114,12 @@ static rt_err_t _max40109_transfer(rt_uint8_t chip_idx, struct rt_i2c_msg *msgs,
 }
 
 /**
- * @brief 通用写寄存器函数
- * @param len 1 为单字节写，2 为双字节写
+ * @brief Generic register write function
+ * @param chip_idx Chip index
+ * @param reg Register address
+ * @param val Value to write
+ * @param len 1 for single byte, 2 for double byte
+ * @return RT_EOK on success, error code on failure
  */
 rt_err_t max40109_write_reg(rt_uint8_t chip_idx, rt_uint8_t reg, rt_uint16_t val, rt_uint8_t len)
 {
@@ -137,8 +146,12 @@ rt_err_t max40109_write_reg(rt_uint8_t chip_idx, rt_uint8_t reg, rt_uint16_t val
 }
 
 /**
- * @brief 通用读寄存器函数
- * @param len 1 为单字节读，2 为双字节读
+ * @brief Generic register read function
+ * @param chip_idx Chip index
+ * @param reg Register address
+ * @param val Pointer to store read value
+ * @param len 1 for single byte, 2 for double byte
+ * @return RT_EOK on success, error code on failure
  */
 rt_err_t max40109_read_reg(rt_uint8_t chip_idx, rt_uint8_t reg, rt_uint16_t *val, rt_uint8_t len)
 {
@@ -217,7 +230,8 @@ rt_err_t global_max40109_read_reg(rt_uint8_t chip_idx, rt_uint8_t reg, rt_uint16
 }
 
 /**
- * @brief Handle specific alerts from the Status Register
+ * @brief Handle chip alerts from status register
+ * @param chip_idx Chip index
  */
 static void handle_chip_alert(rt_uint8_t chip_idx)
 {
@@ -270,12 +284,13 @@ static void handle_chip_alert(rt_uint8_t chip_idx)
     {
     }
 
-    // Clear Status
+    /* Clear status */
     max40109_write_u16(chip_idx, MAX40109_REG_STATUS, status);
 }
 
 /**
- * @brief Alert Processing Thread
+ * @brief Alert processing thread entry
+ * @param parameter Unused
  */
 static void alert_thread_entry(void *parameter)
 {
@@ -302,6 +317,7 @@ static void alert_thread_entry(void *parameter)
 
 /**
  * @brief Initialize all MAX40109 chips
+ * @return RT_EOK on success, error code on failure
  */
 rt_err_t max_app_init(void)
 {
@@ -357,35 +373,40 @@ rt_err_t max_app_init(void)
 
         rt_err_t res = RT_EOK;
 
-        // shutdown to config register
+        /* Shutdown to config register */
         res = max40109_write_u16(i, MAX40109_REG_CONFIG, 0x80);
 
-        //set bridge drive to 4V
+        /* Set bridge drive to 4V */
         res = max40109_write_u8(i, MAX40109_REG_BRIDGE_DRIVE, 0x2);
 
-        // Enable Interrupts default disable temp_data ready and pressure_data ready
+        /* Enable interrupts (default disables temp/pressure ready) */
         res = max40109_write_u16(i, MAX40109_REG_INTERRUPT_ENABLE, 0xFF);
 
-        // Set Sample Rate to 2ksps
+        /* Set sample rate to 2ksps */
         res = max40109_write_u8(i, MAX40109_REG_ADC_SAMPLE_RATE, 0x2);
 
-        //set analog output stage absolute voltage internal resistor
+        /* Set analog output stage: absolute voltage, internal resistor */
         res = max40109_write_u8(i, MAX40109_REG_ANALOG_OUTPUT_STAGE, 0x8);
 
-        // Clear any pending status bits at startup
+        /* Set pga = 144 */
+        res = max40109_write_u8(i, MAX40109_REG_PGA_PRESSURE_GAIN, 0x07);
+
+        /* Clear any pending status bits at startup */
         rt_uint16_t dummy;
         if (max40109_read_u16(i, MAX40109_REG_STATUS, &dummy) == RT_EOK && dummy != 0)
         {
             max40109_write_u16(i, MAX40109_REG_STATUS, dummy);
         }
 
-        // power on
-        res = max40109_read_u16(i, MAX40109_REG_CONFIG, 0x00);
+        /* Power on */
+        res = max40109_write_u16(i, MAX40109_REG_CONFIG, 0x2001);
 
         if(res != RT_EOK){
-            LOG_W("CH[%d] max40109 config init didn't success",i);
+            LOG_W("CH[%d] max40109 config init failed",i);
             continue;
         }
+
+        rt_thread_mdelay(150);
 
         if (alert_pins[i] != 0)
         {
@@ -399,18 +420,24 @@ rt_err_t max_app_init(void)
     return RT_EOK;
 }
 
-rt_err_t max40109_read_pressure(rt_uint8_t chip_idx, int *pressure)
+rt_err_t max40109_read_pressure(rt_uint8_t chip_idx, double *pressure,uint8_t is_calibrated)
 {
     rt_uint16_t raw;
+    rt_err_t ret = RT_EOK;
     //rt_err_t ret = max40109_read_u16(chip_idx, MAX40109_REG_UNCAL_PRESSURE, &raw);
-    rt_err_t ret = max40109_read_u16(chip_idx, MAX40109_REG_CALIBRATED_PRESSURE, &raw);
+    if(is_calibrated){
+        ret = max40109_read_u16(chip_idx, MAX40109_REG_CALIBRATED_PRESSURE, &raw);
+    }
+    else{
+        ret = max40109_read_u16(chip_idx, MAX40109_REG_UNCAL_PRESSURE, &raw);
+    }
     if (ret != RT_EOK) {
         return ret;
     }
 
     int16_t signed_raw = (int16_t)raw;
 
-    *pressure = (int)signed_raw;
+    *pressure = ((double)signed_raw * 1250000 / 32767.0 / 90);
 
     return RT_EOK;
 }

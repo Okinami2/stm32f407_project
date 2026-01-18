@@ -24,7 +24,7 @@
 
 #include "adc_get_thread.h"
 #include "adc_send_thread.h"
-#include "sd_spi_switch.h"
+#include "bsp/sd_spi_switch.h"
 
 #define TX_THREAD_PRIO   20
 #define RESEND_THREAD_PRIO  21  /* 低于主发送线程 */
@@ -40,7 +40,7 @@ static uint8_t dma_tx_buffer[PACKET_DATA_SIZE + 16];
 
 
 //static rt_device_t send_dev = RT_NULL;
-static int sock_fd = -1; /* Socket 文件描述符 */
+static int sock_fd = -1; /* Socket file descriptor */
 
 #define CACHE_INDEX_PATH      "/cache.idx"
 #define CACHE_FILE_PREFIX     "/cache_"
@@ -53,14 +53,14 @@ static int sock_fd = -1; /* Socket 文件描述符 */
 struct cache_index
 {
     rt_uint32_t magic;
-    rt_uint16_t write_file_idx; /* 当前写入的文件编号 */
-    rt_uint16_t read_file_idx;  /* 当前读取重发的文件编号 */
-    rt_uint32_t write_off;      /* 当前写入的偏移量 */
-    rt_uint32_t read_off;       /* 当前读取的偏移量 */
+    rt_uint16_t write_file_idx; /* Current write file index */
+    rt_uint16_t read_file_idx;  /* Current read/resend file index */
+    rt_uint32_t write_off;      /* Current write offset */
+    rt_uint32_t read_off;       /* Current read offset */
 };
 
-static struct rt_mutex cache_lock; /* 保护索引文件和内存缓冲 */
-static struct rt_mutex net_lock;   /* 保护 sock_fd 发送 */
+static struct rt_mutex cache_lock; /* Protect index file and memory buffer */
+static struct rt_mutex net_lock;   /* Protect sock_fd transmission */
 
 #define CACHE_FLUSH_INTERVAL_TICKS   (rt_tick_from_millisecond(5000)) /* 5s */
 #define RAM_CACHE_SIZE               (32U * 1024U)                    /* 32KB */
@@ -97,8 +97,8 @@ static void tcp_close_socket(void)
 
 
 /**
- * @brief 尝试连接服务器
- * @return 0: 成功, -1: 失败
+ * @brief Connect to server
+ * @return 0 on success, -1 on failure
  */
 static int tcp_connect_to_server(void)
 {
@@ -155,10 +155,10 @@ static int tcp_connect_to_server(void)
 }
 
 /**
- * @brief 发送完整数据包
- * @param data 数据指针
- * @param len 数据长度
- * @return 发送成功的字节数，如果失败返回 -1
+ * @brief Send complete data packet
+ * @param data Data pointer
+ * @param len Data length
+ * @return Bytes sent on success, -1 on failure
  */
 static int tcp_send_packet(const uint8_t *data, uint32_t len)
 {
@@ -189,15 +189,15 @@ static int tcp_send_packet(const uint8_t *data, uint32_t len)
 
 
 /**
- * @brief 将分散的 ADC 数据打包到连续的内存中以便 DMA 发送
- * @param start_index 数据在 buffer 中的起始索引 (0 或 BATCH_SIZE)
- * @return 打包后的数据长度
+ * @brief Pack scattered ADC data into contiguous buffer
+ * @param start_index Starting index in buffer (0 or BATCH_SIZE)
+ * @return Packed data length
  */
 static uint32_t pack_data_to_buffer(uint16_t start_index)
 {
     uint32_t offset = 0;
 
-    //添加包头
+    /* Add packet header */
     dma_tx_buffer[offset++] = 0xAA;
     dma_tx_buffer[offset++] = 0x55;
     memcpy(&dma_tx_buffer[offset], &adc_receive_buffer.start_time, sizeof(sys_calendar_time_t));
@@ -221,7 +221,7 @@ static uint32_t pack_data_to_buffer(uint16_t start_index)
     memcpy(&dma_tx_buffer[offset], &adc_receive_buffer.ad7[start_index], BATCH_SIZE * sizeof(float));
     offset += BATCH_SIZE * sizeof(float);
 
-    //添加包尾
+    /* Add packet footer */
     dma_tx_buffer[offset++] = 0x0D;
     dma_tx_buffer[offset++] = 0x0A;
 
@@ -241,7 +241,7 @@ static int write_all(int fd, const rt_uint8_t *buf, rt_uint32_t len)
 }
 
 /**
- * @brief 更新并保存索引 (内部调用，需已持有 cache_lock)
+ * @brief Update and save index (internal, requires cache_lock held)
  */
 static void save_index_locked(struct cache_index *idx)
 {
@@ -255,7 +255,7 @@ static void save_index_locked(struct cache_index *idx)
 }
 
 /**
- * @brief 获取当前索引 (内部调用，需已持有 cache_lock)
+ * @brief Load current index (internal, requires cache_lock held)
  */
 static int load_index_locked(struct cache_index *idx)
 {
@@ -269,9 +269,9 @@ static int load_index_locked(struct cache_index *idx)
 }
 
 /**
- * @brief 将一段连续数据写入 SD NAND 缓存文件（一次性提交索引）
- * @note 该函数假设已 ts_spi_bus_claim()；写入成功后才更新索引，避免断电导致索引前移。
- * @return 0: 成功, -1: 失败
+ * @brief Write contiguous data to SD NAND cache file
+ * @note Assumes ts_spi_bus_claim() called; index updated only after write succeeds
+ * @return 0 on success, -1 on failure
  */
 static int cache_write_blob_locked(const rt_uint8_t *data, rt_uint32_t len)
 {
@@ -341,7 +341,7 @@ static int cache_write_blob_locked(const rt_uint8_t *data, rt_uint32_t len)
 }
 
 /**
- * @brief 将 RAM 缓冲区中的数据一次性刷入 SD NAND
+ * @brief Flush RAM buffer to SD NAND
  */
 static void flush_ram_cache_to_sd(void)
 {
@@ -359,7 +359,7 @@ static void flush_ram_cache_to_sd(void)
 }
 
 /**
- * @brief 发送失败时：先攒到 RAM，满足“满/到时”再刷盘
+ * @brief Save to SD NAND when send fails (buffer in RAM, flush when full/timeout)
  */
 static void save_to_sdnand(uint8_t *data, uint32_t len)
 {
@@ -396,7 +396,8 @@ static void save_to_sdnand(uint8_t *data, uint32_t len)
 
 
 /**
- * @brief 发送线程入口函数
+ * @brief Main send thread entry
+ * @param parameter Unused
  */
 static void send_to_server_thread_entry(void *parameter)
 {
@@ -459,6 +460,10 @@ static void send_to_server_thread_entry(void *parameter)
     }
 }
 
+/**
+ * @brief Resend thread entry - sends cached data when network is available
+ * @param parameter Unused
+ */
 static void adc_resend_thread_entry(void *parameter)
 {
     struct cache_index idx;
@@ -523,7 +528,7 @@ static void adc_resend_thread_entry(void *parameter)
             }
             else
             {
-                /* 发送失败就关 socket，让主线程去重连 */
+                /* Send failed - close socket, let main thread reconnect */
                 tcp_close_socket();
                 rt_thread_mdelay(2000);
             }
@@ -532,7 +537,8 @@ static void adc_resend_thread_entry(void *parameter)
 }
 
 /**
- * @brief 启动发送线程
+ * @brief Start send and resend threads
+ * @return RT_EOK on success
  */
 int adc_send_to_server_start(void)
 {

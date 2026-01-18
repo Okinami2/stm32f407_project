@@ -9,8 +9,8 @@
  */
 #include <rtthread.h>
 #include <rtdevice.h>
-#include "time_service.h"
-#include "sd_spi_switch.h"
+#include "bsp/time_service.h"
+#include "bsp/sd_spi_switch.h"
 
 
 #define DBG_TAG "gnss_thread"
@@ -48,15 +48,15 @@ static int fast_atoi(const char *str, int len)
 }
 
 /**
- * @brief 从 NMEA RMC 语句中提取时间戳
- * @param nmea_line NMEA 语句字符串
- * @param out_timestamp 输出的 Unix 时间戳
- * @return 0: 成功, -1: 失败
+ * @brief Parse timestamp from NMEA RMC sentence
+ * @param nmea_line NMEA sentence string
+ * @param out_timestamp Output Unix timestamp
+ * @return 0 on success, -1 on failure
  */
 static int parse_rmc_time(const char *nmea_line, time_t *out_timestamp)
 {
-    // RMC 格式: $xxRMC,time,status,lat,NS,lon,EW,speed,course,date,mag,magEW,mode*checksum
-    // 字段索引:    0     1     2      3   4   5   6    7      8     9    10  11    12
+    // RMC format: $xxRMC,time,status,lat,NS,lon,EW,speed,course,date,mag,magEW,mode*checksum
+    // Field index:  0     1     2      3   4   5   6    7      8     9    10  11    12
     const char *fields[13] = {0};
     int field_idx = 0;
     const char *p = nmea_line;
@@ -81,7 +81,7 @@ static int parse_rmc_time(const char *nmea_line, time_t *out_timestamp)
     }
 
     const char *time_ptr = fields[0];   // HHMMSS.sss
-    const char *status_ptr = fields[1]; // A=有效, V=无效
+    const char *status_ptr = fields[1]; // A=valid, V=invalid
     const char *date_ptr = fields[8];   // DDMMYY
 
     if (!time_ptr || time_ptr[0] < '0' || time_ptr[0] > '9') {
@@ -144,8 +144,8 @@ static int parse_rmc_time(const char *nmea_line, time_t *out_timestamp)
     return 0;
 }
 
-// GGA 格式: $GNGGA,UTC,Latitude,N/S,Longitude,E/W,Position Fix Indicator,Satellites Used,HDOP,MSL Altitude,AltUnit,GeoSep,GeoSepUnit...
-// 字段索引:  0   1   2        3   4         5   6                      7               8    9   10       11      12
+// GGA format: $GNGGA,UTC,Latitude,N/S,Longitude,E/W,Position Fix Indicator,Satellites Used,HDOP,MSL Altitude,AltUnit,GeoSep,GeoSepUnit...
+// Field index:  0   1   2        3   4         5   6                      7               8    9   10       11      12
 static int parse_gga_sat_used(const char *nmea_line, int *fix_quality, int *sat_used, float *hdop)
 {
     const char *fields[20] = {0};
@@ -165,7 +165,7 @@ static int parse_gga_sat_used(const char *nmea_line, int *fix_quality, int *sat_
             p++;
         }
 
-        if (field_idx >= 8) break;   // 只要到HDOP就够了
+        if (field_idx >= 8) break;   /* Only need up to HDOP */
     }
 
     if (field_idx < 8) return -1;
@@ -224,21 +224,17 @@ static void gnss_thread_entry(void *parameter)
                     if (rt_strstr(line_buffer, "RMC"))
                     {
                         time_t gps_utc = 0;
-                        //rt_kprintf("RMC: %s \n",line_buffer);
 
                         if (parse_rmc_time(line_buffer, &gps_utc) == 0)
                         {
-                            //rt_kprintf("timestamp for nmea: %d \n",gps_utc);
                             ts_correct_time_by_nmea(gps_utc);
-                            //rt_kprintf("[GNSS] Sync OK: %d \n", gps_utc);
                         }
                         else
                         {
-                            // 解析失败或 Status='V' (未定位)
+                            /* Parse failed or Status='V' (no fix) */
                         }
                     }
                     else if(rt_strstr(line_buffer, "GGA")){
-                        // rt_kprintf("GGA: %s \n",line_buffer);
                         int fq, used;
                         float hdop;
                         if (parse_gga_sat_used(line_buffer, &fq, &used,&hdop) == 0) {

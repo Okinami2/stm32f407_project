@@ -17,11 +17,11 @@ extern TIM_HandleTypeDef htim2;
 
 
 typedef struct {
-    uint32_t system_base_sec;   // 最近一次确定的基准秒 (UTC)
-    uint32_t last_pps_tick;     // 最近一次 PPS 触发时的硬件计数器值
-    uint32_t   last_pps_ovf;         // 硬件计数器溢出次数
-    double   ticks_per_sec;     // 滤波器修正后的频率
-    PPS_State_t state;          // 状态机状态
+    uint32_t system_base_sec;   /* Most recent confirmed base seconds (UTC) */
+    uint32_t last_pps_tick;     /* Hardware counter value at last PPS */
+    uint32_t   last_pps_ovf;         /* Hardware counter overflow count */
+    double   ticks_per_sec;     /* Frequency corrected by filter */
+    PPS_State_t state;          /* State machine state */
 } TimeEngine_t;
 
 
@@ -40,7 +40,7 @@ static TimeEngine_t engine = {
 extern TIM_HandleTypeDef htim2;
 static volatile uint32_t tim2_ovf = 0;
 
-// 重写中断回调函数，不能重写HAL_TIM_PeriodElapsedCallback，因为已经被bsp占用了，但是底层没适配tim2
+/* TIM2 IRQ handler - override HAL callback as BSP doesn't support TIM2 */
 void TIM2_IRQHandler(void)
 {
     rt_interrupt_enter();
@@ -267,7 +267,7 @@ void ts_get_calendar_time(sys_calendar_time_t *cal) {
     cal->microsecond = ts.usec;
 }
 
-/* NMEA 校准  */
+/* NMEA time correction */
 void ts_correct_time_by_nmea(time_t utc_sec) {
     uint32_t now = TS_HW_TIMER->CNT;
 
@@ -286,7 +286,7 @@ void ts_correct_time_by_nmea(time_t utc_sec) {
     rt_hw_interrupt_enable(level);
 }
 
-/* NTP 校准  */
+/* NTP time correction */
 void ts_correct_time_by_ntp_offset_us(int64_t offset_us)
 {
     Timestamp_t now;

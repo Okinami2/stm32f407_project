@@ -71,6 +71,7 @@
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc://${ProjName}/libraries//STM32F4xx_HAL_Driver//Inc//Legacy}&quot;" />
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc://${ProjName}/.}&quot;" />
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc://${ProjName}/applications}&quot;" />
+                  <listOptionValue builtIn="false" value="&quot;//${ProjName}/applications/bsp&quot;" />
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc://${ProjName}//.}&quot;" />
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc://${ProjName}//cubemx/Inc}&quot;" />
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc://${ProjName}//cubemx}&quot;" />

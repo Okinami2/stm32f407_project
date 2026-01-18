@@ -9,7 +9,7 @@
 #include <sys/time.h>
 #include "board.h"
 
-/* 硬件定时器配置 */
+/* Hardware timer configuration */
 #define TS_HW_TIMER         TIM2
 #define TS_HW_TIMER_CLK     84000000
 #define TS_TIMER_PRESCALER  83
@@ -18,10 +18,10 @@
 #define TS_NTP_SYNC_THRESHOLD_US  100000
 #define PPS_VALID_TOLERANCE_US    100
 
-#define PPS_ACQ_VALID_COUNT              5       /* LOCKED 所需连续有效次数 */
-#define PPS_LOCKED_TIMEOUT           30      /* LOCKED -> HOLDOVER*/
-#define PPS_HOLDOVER_TIMEOUT            360     /* HOLDOVER -> FREERUN*/
-#define PPS_ACQUIRING_TIMEOUT            360     /* ACQUIRING -> FREERUN*/
+#define PPS_ACQ_VALID_COUNT              5       /* Required consecutive valid PPS for LOCKED */
+#define PPS_LOCKED_TIMEOUT           30      /* LOCKED -> HOLDOVER timeout (seconds) */
+#define PPS_HOLDOVER_TIMEOUT            360     /* HOLDOVER -> FREERUN timeout (seconds) */
+#define PPS_ACQUIRING_TIMEOUT            360     /* ACQUIRING -> FREERUN timeout (seconds) */
 
 typedef struct{
     uint32_t       sec;

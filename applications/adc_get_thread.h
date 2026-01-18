@@ -10,10 +10,10 @@
 #ifndef APPLICATIONS_ADC_GET_THREAD_H_
 #define APPLICATIONS_ADC_GET_THREAD_H_
 
-#include "ads131m08_app.h"
-#include "digital_filtering.h"
+#include "bsp/ads131m08_app.h"
+#include "bsp/digital_filtering.h"
 #include "config_thread.h"
-#include "time_service.h"
+#include "bsp/time_service.h"
 
 
 #define BATCH_SIZE 64
