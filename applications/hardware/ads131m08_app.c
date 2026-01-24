@@ -9,7 +9,7 @@
 #define DBG_LVL DBG_LOG
 #include <rtdbg.h>
 
-/* 定时器相关变量 */
+/* Timer related variables */
 #define HWTIMER_DEV_NAME   "timer3"
 rt_sem_t tim3_sem = RT_NULL;
 rt_hwtimerval_t tim3_timeout_s;
@@ -72,7 +72,7 @@ static rt_err_t tim3_timeout_cb(rt_device_t dev, rt_size_t size)
 }
 
 /**
- * @brief 初始化TIM3定时器
+ * @brief Initialize TIM3 hardware timer for sample rate control
  */
 int tim3_init(void)
 {
@@ -96,7 +96,7 @@ int tim3_init(void)
     }
 
     rt_hwtimer_mode_t mode = HWTIMER_MODE_PERIOD;
-    rt_uint32_t freq = 1000000;       /* 计数频率 */
+    rt_uint32_t freq = 1000000;       /* Counter frequency */
     ret = rt_device_control(tim3_dev, HWTIMER_CTRL_FREQ_SET, &freq);
         if (ret != RT_EOK)
         {
@@ -125,12 +125,10 @@ int tim3_init(void)
 
 
 /**
- * @brief  将 ADS131M08 的原始 ADC 读数转换为电压值。
- *
- * @param  raw_value  从 ADC 读取的32位原始数据
- * @param  gain       采集该数据的增益。
- *
- * @return float      转换后的电压值 (单位: uV)。如果增益无效，则返回 NAN。
+ * @brief Convert raw ADC reading to voltage value in microvolts
+ * @param raw_value Raw 32-bit ADC data
+ * @param gain Gain setting used for acquisition
+ * @return Voltage in uV, or NAN if gain is invalid
  */
 float ads131m08_convert_to_voltage_uv(rt_int32_t raw_value, rt_uint16_t gain)
 {
@@ -149,16 +147,16 @@ float ads131m08_convert_to_voltage_uv(rt_int32_t raw_value, rt_uint16_t gain)
             return NAN;
     }
 
-    float voltage_uv = ((float)raw_value / ADC_FULL_SCALE_CODE) * fsr * 1e6f;
+    float voltage_uv = ((float)raw_value / ADC_FULL_SCALE_CODE / 90 / 4) * fsr * 1e6f; /* 90 is the gain from max40109,fiexd for test, 4 is the out stage gain in max40109*/
 
     return voltage_uv;
 }
 
 /**
- * @brief 根据公式将电压值转换为应变值。
-  *      公式: ε = V / S1 + ε0
- * @param input_voltage_v 输入的电压值，单位为 uV。
- * @return float 转换后的应变值，单位为 uε。
+ * @brief Convert voltage to strain value
+ * Formula: ε = V / S1 + ε0
+ * @param input_voltage_v Input voltage in uV
+ * @return Strain value in microstrain (uε)
  */
 float convert_to_strain_ue(float input_voltage_v)
 {
@@ -169,10 +167,10 @@ float convert_to_strain_ue(float input_voltage_v)
 }
 
 /**
- * @brief 根据公式将电压值转换为加速度值。公式: a = V/S2 + a0。
- *
- * @param input_voltage_v 输入的电压值，单位为uV。
- * @return float 转换后的加速度值，单位为 mg。
+ * @brief Convert voltage to acceleration value
+ * Formula: a = V/S2 + a0
+ * @param input_voltage_v Input voltage in uV
+ * @return Acceleration value in mg
  */
 float convert_to_acceleration_mg(float input_voltage_v)
 {
@@ -181,4 +179,3 @@ float convert_to_acceleration_mg(float input_voltage_v)
     float acceleration = ((input_voltage_v / 1e6f ) / app_config.acceleration_S2) + app_config.a_0;
     return acceleration;
 }
-

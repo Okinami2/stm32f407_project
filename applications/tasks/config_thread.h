@@ -4,7 +4,7 @@
 #include <rtthread.h>
 #include <stddef.h>
 
-// 异常值检测方法
+/* Outlier detection methods */
 typedef enum {
     OUTLIER_DETECT_NONE = 0,
     OUTLIER_DETECT_LIMIT,
@@ -13,7 +13,7 @@ typedef enum {
     OUTLIER_DETECT_ALL_SEQUENTIAL
 } OutlierDetectionMethod;
 
-// 滤波类型
+/* Filter types */
 typedef enum {
     FILTER_TYPE_NONE = 0,
     FILTER_TYPE_MOVING_AVERAGE,
@@ -23,17 +23,17 @@ typedef enum {
 
 typedef enum
 {
-    // adc相关
+    /* ADC related */
     CONFIG_ADC_GAIN = 0,
     CONFIG_ADC_ENABLE_CHANNEL,
     CONFIG_SAMPLE_RATE,
-    //应变、加速度相关
+    /* Strain, acceleration related */
     CONFIG_STRAIN_S1,
     CONFIG_EPSILON_0,
     CONFIG_ACCELERATION_S2,
     CONFIG_A_0,
     CONFIG_ADC_DATA_TYPE,
-    //滤波器相关
+    /* Filter related */
     CONFIG_ENABLE_FILTER,
     CONFIG_OUTLIER_DETECTION_METHOD,
     CONFIG_FILTER_TYPE,
@@ -49,7 +49,7 @@ typedef struct {
     config_update_name msg_name;
 } config_update_msg_t;
 
-/* app config*/
+/* Application configuration */
 typedef struct {
     rt_uint8_t sample_rate;
     rt_uint16_t adc_gain;
@@ -73,7 +73,8 @@ typedef struct {
 } app_config_t;
 
 extern app_config_t app_config;
-extern rt_mq_t config_update_notify;
+extern rt_mq_t config_adc_update_notify;;
+extern rt_mq_t config_ntp_update_notify;
 /**
  * @brief Initialize and start configuration thread.
  *

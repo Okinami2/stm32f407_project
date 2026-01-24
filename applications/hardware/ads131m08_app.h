@@ -12,8 +12,8 @@
 
 #include <rtthread.h>
 #include "ads131m08_hal.h"
-#include "digital_filtering.h"
-#include "config_thread.h"
+#include "../services/digital_filtering.h"
+#include "../tasks/config_thread.h"
 
 // ADC参考电压和满量程码值 (24位ADC)
 #define ADC_VREF                1.2f

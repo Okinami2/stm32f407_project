@@ -1,5 +1,8 @@
 #include "sd_spi_switch.h"
 #include "time_service.h"
+
+extern void gnss_uart_suspend(void);
+extern void gnss_uart_resume(void);
 #include "stm32f4xx_hal.h"
 #include <rtthread.h>
 #include "board.h"

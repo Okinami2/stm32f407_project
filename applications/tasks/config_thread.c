@@ -2,8 +2,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "config_thread.h"
-
-#include "max40109_hal.h"
+#include "../services/time_service.h"
+#include "../hardware/max40109_hal.h"
 
 #include <stdlib.h>
 #if defined(RT_USING_FINSH) || defined(RT_USING_MSH)
@@ -22,8 +22,8 @@ typedef struct
 #define MAX_CONFIG_ITEMS 32
 static config_entry_t config_registry[MAX_CONFIG_ITEMS];
 static int config_registry_count = 0;
-rt_mq_t config_update_notify = RT_NULL;
-
+rt_mq_t config_adc_update_notify = RT_NULL;
+rt_mq_t config_ntp_update_notify = RT_NULL;
 app_config_t app_config = {
         .adc_gain = 1,
         .sample_rate = 1,
@@ -43,7 +43,7 @@ app_config_t app_config = {
         .low_pass_alpha = 0.1,
 };
 
-/* Registry implementation */
+/* Registry functions */
 int config_register(const char *name, config_update_name update_name, void *ptr, size_t size)
 {
     if (!name || !ptr) return -RT_ERROR;
@@ -72,8 +72,7 @@ static void config_send_update_message(config_update_name msg_name)
     config_update_msg_t msg = {
         .msg_name = msg_name
     };
-
-    rt_err_t result = rt_mq_send(config_update_notify, &msg, sizeof(msg));
+    rt_err_t result = rt_mq_send(config_adc_update_notify, &msg, sizeof(msg));
     if (result != RT_EOK) {
         rt_kprintf("Failed to send config message: %d\n", msg_name);
     }
@@ -392,14 +391,10 @@ static rt_err_t read_max_chip(const char* id_str, const char* addr_str,rt_uint8_
 
 
 /**
- * @brief Entry point for the configuration thread.
- *
- * This function provides a simple shell for modifying the application configuration.
- * @param parameter Unused.
+ * @brief Entry point for configuration thread (currently unused)
+ * @param parameter Unused
  */
-/* Thread entry is unused when running via finsh/msh only. If you later
- * want to re-enable a CLI thread, you can restore the implementation.
- */
+/* Thread entry unused when using finsh/msh. Restore if needed. */
 /*
 static void config_thread_entry(void *parameter)
 {
@@ -408,17 +403,13 @@ static void config_thread_entry(void *parameter)
 */
 
 #if defined(RT_USING_FINSH) || defined(RT_USING_MSH)
-/* Finsh command wrapper - integrates registry with system shell.
- * Usage:
- *   config list
- *   config get <name>
- *   config set <name> <value>
- */
+/* Finsh command wrapper - integrates registry with system shell */
+/* Usage: config list | get <name> | set <name> <value> */
 static int finsh_cmd_config(int argc, char **argv)
 {
     if (argc < 2)
     {
-        rt_kprintf("usage: config list|get|set|write_max_chip ...\n");
+        rt_kprintf("usage: config list|get|set|write_max_chip|read_max_chip|update_ntp ...\n");
         return -RT_ERROR;
     }
 
@@ -498,12 +489,23 @@ static int finsh_cmd_config(int argc, char **argv)
 
         return RT_EOK;
     }
-    // 临时调试gnss状态机使用
+    // show pps state machine
     else if(strcmp(argv[1], "show_pps") == 0){
         uint32_t base_utc = get_system_base_sec();
         uint32_t pps_tick = get_last_pps_tick();
         rt_kprintf("now, the sys_base_utc=%d, record pps_tick=%d\n",base_utc,pps_tick);
 
+        return RT_EOK;
+    }
+    // update sys_time by ntp
+    else if(strcmp(argv[1], "update_ntp") == 0){
+        config_update_msg_t msg = {
+                .msg_name = CONFIG_ADC_GAIN // the msg name is no meaning
+        };
+        rt_err_t result = rt_mq_send(config_ntp_update_notify, &msg, sizeof(msg));
+        if (result != RT_EOK) {
+            rt_kprintf("Failed to update_ntp\n");
+        }
         return RT_EOK;
     }
 
@@ -536,8 +538,9 @@ int config_thread_init(void)
     config_register("n_sigma",CONFIG_N_SIGMA, &app_config.n_sigma, sizeof(app_config.n_sigma));
     config_register("low_pass_alpha",CONFIG_LOW_PASS_ALPHA, &app_config.low_pass_alpha, sizeof(app_config.low_pass_alpha));
 
-    config_update_notify = rt_mq_create("config_update_notify", sizeof(config_update_msg_t), 10, RT_IPC_FLAG_FIFO);
-    if (config_update_notify == RT_NULL) {
+    config_adc_update_notify = rt_mq_create("config_adc_update_notify", sizeof(config_update_msg_t), 10, RT_IPC_FLAG_FIFO);
+    config_ntp_update_notify = rt_mq_create("config_ntp_update_notify", sizeof(config_update_msg_t), 10, RT_IPC_FLAG_FIFO);
+    if (config_adc_update_notify == RT_NULL || config_ntp_update_notify == RT_NULL ) {
             rt_kprintf("Error: Failed to create mq config_update_notify.\n");
             return -RT_ERROR;
         }

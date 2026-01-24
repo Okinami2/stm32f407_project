@@ -1,0 +1,16 @@
+import os
+from building import *
+
+cwd = GetCurrentDir()
+objs = []
+
+# Add main.c
+objs += Object('main.c')
+
+# Add subdirectories
+for d in ['tasks', 'hardware', 'services']:
+    path = os.path.join(cwd, d)
+    if os.path.isfile(os.path.join(path, 'SConscript')):
+        objs = objs + SConscript(os.path.join(d, 'SConscript'))
+
+Return('objs')

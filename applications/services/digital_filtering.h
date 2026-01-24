@@ -14,7 +14,7 @@
 #include <rtthread.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include "config_thread.h"
+#include "../tasks/config_thread.h"
 
 #define NUM_ADC_CHANNELS 8
 #define HISTORY_WINDOW_SIZE 20 // 移动窗口大小

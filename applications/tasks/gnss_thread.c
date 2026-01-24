@@ -9,8 +9,8 @@
  */
 #include <rtthread.h>
 #include <rtdevice.h>
-#include "time_service.h"
-#include "sd_spi_switch.h"
+#include "../services/time_service.h"
+#include "../services/sd_spi_switch.h"
 
 
 #define DBG_TAG "gnss_thread"

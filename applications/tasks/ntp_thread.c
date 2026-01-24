@@ -15,7 +15,7 @@
 #include <sys/time.h>
 #include <math.h>
 #include <string.h>
-#include "time_service.h"
+#include "../services/time_service.h"
 
 #define DBG_TAG "ntp_task"
 #define DBG_LVL DBG_INFO
