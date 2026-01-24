@@ -9,8 +9,13 @@
  */
 #include <rtthread.h>
 #include <rtdevice.h>
+<<<<<<< HEAD:applications/gnss_thread.c
 #include "bsp/time_service.h"
 #include "bsp/sd_spi_switch.h"
+=======
+#include "../services/time_service.h"
+#include "../services/sd_spi_switch.h"
+>>>>>>> refactor/logs:applications/tasks/gnss_thread.c
 
 
 #define DBG_TAG "gnss_thread"

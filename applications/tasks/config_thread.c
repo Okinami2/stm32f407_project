@@ -2,8 +2,9 @@
 #include <stdio.h>
 #include <string.h>
 #include "config_thread.h"
-#include "bsp/time_service.h"
-#include "bsp/max40109_hal.h"
+
+#include "../services/time_service.h"
+#include "../hardware/max40109_hal.h"
 
 #include <stdlib.h>
 #if defined(RT_USING_FINSH) || defined(RT_USING_MSH)

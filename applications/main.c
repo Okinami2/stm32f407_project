@@ -11,18 +11,28 @@
 #include <rtdevice.h>
 #include <board.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <dfs_fs.h>
 #include "drv_spi.h"
 #include "spi_msd.h"
 #include "ntp.h"
 
 #include "main.h"
+<<<<<<< HEAD
 #include "config_thread.h"
 #include "adc_get_thread.h"
 #include "adc_send_thread.h"
 #include "bsp/max40109_hal.h"
 #include "bsp/time_service.h"
 #include "bsp/sd_spi_switch.h"
+=======
+#include "tasks/config_thread.h"
+#include "tasks/adc_get_thread.h"
+#include "tasks/adc_send_thread.h"
+#include "hardware/max40109_hal.h"
+#include "services/time_service.h"
+#include "services/sd_spi_switch.h"
+>>>>>>> refactor/logs
 
 #define DBG_TAG "main"
 #define DBG_LVL DBG_LOG
@@ -153,11 +163,10 @@ int main(void)
         rt_kprintf("fail start adc_get_thread\n");
     }
 
-    /* Test code - temporarily disabled
+    /* Test code - temporarily disabled*/
     if(adc_send_to_server_start() != RT_EOK){
         rt_kprintf("fail start adc_send_thread\n");
     }
-     */
 
     /* Test code for time display*/
     // struct timeval sys_time;

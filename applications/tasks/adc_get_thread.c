@@ -12,7 +12,14 @@
 #include <rtthread.h>
 #include <rtdevice.h>
 #include <board.h>
+
 #include "adc_get_thread.h"
+#include "config_thread.h"
+#include "../services/adc_packet.h"
+#include "../hardware/ads131m08_hal.h"
+#include "../hardware/ads131m08_app.h"
+#include "../services/digital_filtering.h"
+#include "../services/time_service.h"
 
 #define DBG_TAG "adc.get"
 #define DBG_LVL DBG_LOG
@@ -110,15 +117,17 @@ static void adc_get_thread_entry(void *parameter)
                 if (rt_sem_take(drdy_sem, rt_tick_from_millisecond(5)) == RT_EOK)
                 {
                     if(batch_index % BATCH_SIZE == 0){
+                        uint8_t ts_idx = (batch_index == 0) ? 0 : 1;
                         ts_get_calendar_time(&sys_time);
-                        adc_receive_buffer.start_time.year = sys_time.year;
-                        adc_receive_buffer.start_time.month = sys_time.month;
-                        adc_receive_buffer.start_time.day = sys_time.day;
-                        adc_receive_buffer.start_time.hour = sys_time.hour;
-                        adc_receive_buffer.start_time.minute = sys_time.minute;
-                        adc_receive_buffer.start_time.second = sys_time.second;
-                        adc_receive_buffer.start_time.microsecond = sys_time.microsecond;
-                        adc_receive_buffer.sample_rate = app_config.sample_rate;
+
+                        adc_receive_buffer.start_time[ts_idx].year = sys_time.year;
+                        adc_receive_buffer.start_time[ts_idx].month = sys_time.month;
+                        adc_receive_buffer.start_time[ts_idx].day = sys_time.day;
+                        adc_receive_buffer.start_time[ts_idx].hour = sys_time.hour;
+                        adc_receive_buffer.start_time[ts_idx].minute = sys_time.minute;
+                        adc_receive_buffer.start_time[ts_idx].second = sys_time.second;
+                        adc_receive_buffer.start_time[ts_idx].microsecond = sys_time.microsecond;
+                        adc_receive_buffer.sample_rate[ts_idx] = app_config.sample_rate;
                     }
                     if (ads131m08_read_data_frame(adc_data_buffer, RT_FALSE) == RT_EOK)
                     {

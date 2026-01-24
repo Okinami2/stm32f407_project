@@ -179,4 +179,3 @@ float convert_to_acceleration_mg(float input_voltage_v)
     float acceleration = ((input_voltage_v / 1e6f ) / app_config.acceleration_S2) + app_config.a_0;
     return acceleration;
 }
-

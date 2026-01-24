@@ -292,6 +292,11 @@ void ts_correct_time_by_ntp_offset_us(int64_t offset_us)
     Timestamp_t now;
     ts_get_time(&now);
 
+    if(engine.state != PPS_STATE_INIT || engine.state != PPS_STATE_FREERUN){
+        rt_kprintf("the sys time is high precision,ntp diff=%d us",offset_us);
+        return;
+    }
+
     int64_t now_us    = (int64_t)now.sec * 1000000LL + (int64_t)now.usec;
     int64_t target_us = now_us + offset_us;
 

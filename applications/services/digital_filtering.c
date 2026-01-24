@@ -2,7 +2,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include "digital_filtering.h"
-#include "config_thread.h"
+#include "../tasks/config_thread.h"
 
 static int _compare_int32(const void* a, const void* b) {
     rt_int32_t val_a = *(const rt_int32_t*)a;

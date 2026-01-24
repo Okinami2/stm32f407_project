@@ -15,8 +15,12 @@
 #include <sys/time.h>
 #include <math.h>
 #include <string.h>
+<<<<<<< HEAD:applications/ntp_thread.c
 #include "bsp/time_service.h"
 #include "config_thread.h"
+=======
+#include "../services/time_service.h"
+>>>>>>> refactor/logs:applications/tasks/ntp_thread.c
 
 #define DBG_TAG "ntp_task"
 #define DBG_LVL DBG_INFO
