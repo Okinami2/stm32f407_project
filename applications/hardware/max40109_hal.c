@@ -315,11 +315,35 @@ static void alert_thread_entry(void *parameter)
     }
 }
 
+
+rt_err_t max40109_read_pressure(rt_uint8_t chip_idx, double *pressure,uint8_t is_calibrated)
+{
+    rt_uint16_t raw;
+    rt_err_t ret = RT_EOK;
+    //rt_err_t ret = max40109_read_u16(chip_idx, MAX40109_REG_UNCAL_PRESSURE, &raw);
+    if(is_calibrated){
+        ret = max40109_read_u16(chip_idx, MAX40109_REG_CALIBRATED_PRESSURE, &raw);
+    }
+    else{
+        ret = max40109_read_u16(chip_idx, MAX40109_REG_UNCAL_PRESSURE, &raw);
+    }
+    if (ret != RT_EOK) {
+        return ret;
+    }
+
+    int16_t signed_raw = (int16_t)raw;
+
+    *pressure = ((double)signed_raw * 1250000 / 32767.0 / 90);
+
+    return RT_EOK;
+}
+
+
 /**
  * @brief Initialize all MAX40109 chips
  * @return RT_EOK on success, error code on failure
  */
-rt_err_t max_app_init(void)
+int max_app_init(void)
 {
 
     i2c_bus = (struct rt_i2c_bus_device *)rt_device_find(I2C_BUS_NAME);
@@ -419,25 +443,4 @@ rt_err_t max_app_init(void)
     LOG_I("MAX40109 Init Completed", NUM_MAX_CHIPS);
     return RT_EOK;
 }
-
-rt_err_t max40109_read_pressure(rt_uint8_t chip_idx, double *pressure,uint8_t is_calibrated)
-{
-    rt_uint16_t raw;
-    rt_err_t ret = RT_EOK;
-    //rt_err_t ret = max40109_read_u16(chip_idx, MAX40109_REG_UNCAL_PRESSURE, &raw);
-    if(is_calibrated){
-        ret = max40109_read_u16(chip_idx, MAX40109_REG_CALIBRATED_PRESSURE, &raw);
-    }
-    else{
-        ret = max40109_read_u16(chip_idx, MAX40109_REG_UNCAL_PRESSURE, &raw);
-    }
-    if (ret != RT_EOK) {
-        return ret;
-    }
-
-    int16_t signed_raw = (int16_t)raw;
-
-    *pressure = ((double)signed_raw * 1250000 / 32767.0 / 90);
-
-    return RT_EOK;
-}
+INIT_DEVICE_EXPORT(max_app_init);

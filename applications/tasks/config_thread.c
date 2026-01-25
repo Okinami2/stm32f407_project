@@ -549,3 +549,4 @@ int config_thread_init(void)
     rt_kprintf("Configuration initialized (finsh commands active).\n");
     return RT_EOK;
 }
+INIT_ENV_EXPORT(config_thread_init);

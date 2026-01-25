@@ -18,21 +18,12 @@
 #include "ntp.h"
 
 #include "main.h"
-<<<<<<< HEAD
-#include "config_thread.h"
-#include "adc_get_thread.h"
-#include "adc_send_thread.h"
-#include "bsp/max40109_hal.h"
-#include "bsp/time_service.h"
-#include "bsp/sd_spi_switch.h"
-=======
 #include "tasks/config_thread.h"
 #include "tasks/adc_get_thread.h"
 #include "tasks/adc_send_thread.h"
 #include "hardware/max40109_hal.h"
 #include "services/time_service.h"
 #include "services/sd_spi_switch.h"
->>>>>>> refactor/logs
 
 #define DBG_TAG "main"
 #define DBG_LVL DBG_LOG
@@ -106,7 +97,7 @@ static void dump_cache_files(void)
 }
 
 
-rt_err_t sdnand_init_mount(void)
+int sdnand_init_mount(void)
 {
     rt_pin_write(BSP_RFMODPWR_EN_PIN,PIN_HIGH);
     rt_pin_write(BSP_TFPWR_EN_PIN,PIN_HIGH);
@@ -142,22 +133,11 @@ rt_err_t sdnand_init_mount(void)
     ts_spi_bus_release();
     return RT_EOK;
 }
+INIT_DEVICE_EXPORT(sdnand_init_mount);
 
 int main(void)
 {
     int count = 1;
-
-    if(config_thread_init() != RT_EOK){/* Must initialize config thread first */
-        rt_kprintf("fail start config_thread\n");
-    }
-
-    if(sdnand_init_mount() != RT_EOK){
-        rt_kprintf("fail start sdnand_init_mount\n");
-    }
-
-    if(max_app_init() != RT_EOK){
-        rt_kprintf("fail max_app_init\n");
-    }
 
     if(adc_get_thread_start() != RT_EOK){
         rt_kprintf("fail start adc_get_thread\n");
@@ -167,6 +147,9 @@ int main(void)
     if(adc_send_to_server_start() != RT_EOK){
         rt_kprintf("fail start adc_send_thread\n");
     }
+
+
+
 
     /* Test code for time display*/
     // struct timeval sys_time;

@@ -56,7 +56,7 @@
 #define NUM_MAX_CHIPS 8
 
 /* Function Prototypes */
-rt_err_t max_app_init(void);
+int max_app_init(void);
 rt_err_t global_max40109_write_reg(rt_uint8_t chip_idx, rt_uint8_t reg, rt_uint16_t val, rt_uint8_t len);
 rt_err_t global_max40109_read_reg(rt_uint8_t chip_idx, rt_uint8_t reg, rt_uint16_t *val, rt_uint8_t len);
 rt_err_t max40109_read_pressure(rt_uint8_t chip_idx, double *pressure, uint8_t is_calibrated);
