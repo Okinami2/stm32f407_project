@@ -20,6 +20,10 @@
 #include "data_cache.h"
 #include "../services/sd_spi_switch.h"
 
+#define DBG_TAG "data_cache"
+#define DBG_LVL DBG_LOG
+#include <rtdbg.h>
+
 /* 缓存文件配置 */
 #define CACHE_INDEX_PATH      "/cache.idx"
 #define CACHE_FILE_PREFIX     "/cache_"
@@ -357,3 +361,85 @@ uint32_t data_cache_get_ram_usage(void)
 {
     return ram_buf_offset;
 }
+
+
+void dump_cache_files(void)
+{
+    int fd;
+    int i;
+    rt_uint8_t raw[sizeof(struct cache_index)] = {0};
+
+    rt_kprintf("\n===== CACHE FILE DUMP =====\n");
+
+    ts_spi_bus_claim();
+    fd = open(CACHE_INDEX_PATH, O_RDONLY, 0);
+    if (fd < 0)
+    {
+        rt_kprintf("open %s failed\n", CACHE_INDEX_PATH);
+        ts_spi_bus_release();
+        return;
+    }
+
+    int r = read(fd, raw, sizeof(raw));
+    close(fd);
+
+    rt_kprintf("cache.idx raw (%d bytes):\n", r);
+    for (i = 0; i < r; i++)
+    {
+        rt_kprintf("%02X ", raw[i]);
+    }
+    rt_kprintf("\n");
+
+    /* 2. Parse as structure */
+    struct cache_index idx;
+    rt_memcpy(&idx, raw, sizeof(idx));
+
+    rt_kprintf("parsed cache.idx:\n");
+    rt_kprintf("  magic          = 0x%08X\n", idx.magic);
+    rt_kprintf("  write_file_idx = %u\n", idx.write_file_idx);
+    rt_kprintf("  read_file_idx  = %u\n", idx.read_file_idx);
+    rt_kprintf("  write_off      = %u\n", idx.write_off);
+    rt_kprintf("  read_off       = %u\n", idx.read_off);
+
+    rt_kprintf("===== END DUMP =====\n\n");
+
+    ts_spi_bus_release();
+}
+
+int sdnand_init_mount(void)
+{
+    rt_pin_write(BSP_RFMODPWR_EN_PIN,PIN_HIGH);
+    rt_pin_write(BSP_TFPWR_EN_PIN,PIN_HIGH);
+
+    ts_spi_bus_claim();
+
+    rt_thread_mdelay(100);
+    rt_pin_mode(BSP_SD_CS_PIN,PIN_MODE_OUTPUT);
+    rt_err_t res = rt_hw_spi_device_attach("spi3", "spi30", SD_CS_GPIO_Port, SD_CS_Pin);
+    if(res == RT_EOK ){
+        res = msd_init("sdnand0","spi30");
+    }
+
+    int ret = dfs_mount("sdnand0", "/", "elm", 0, 0);
+
+    if (ret == 0)
+    {
+        LOG_I("FatFS mounted to /");
+    }
+    else
+    {
+        LOG_E("Mount failed! Error code: %d", ret);
+        LOG_W("Retrying mount in 500ms...");
+
+        rt_thread_mdelay(500);
+        if (dfs_mount("sdnand0", "/", "elm", 0, 0) == 0) {
+            LOG_I("Retry mount success!");
+        } else {
+            LOG_E("Retry mount failed.");
+        }
+    }
+
+    ts_spi_bus_release();
+    return RT_EOK;
+}
+INIT_DEVICE_EXPORT(sdnand_init_mount);

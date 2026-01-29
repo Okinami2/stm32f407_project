@@ -14,7 +14,13 @@
 #include <rtthread.h>
 #include <rtdef.h>
 #include <stdbool.h>
-
+#include <rtdevice.h>
+#include <board.h>
+#include <unistd.h>
+#include <dfs_fs.h>
+#include "drv_spi.h"
+#include "spi_msd.h"
+#include "main.h"
 /**
  * @brief 初始化数据缓存模块
  * @return 0: 成功, -1: 失败
@@ -54,6 +60,9 @@ bool data_cache_has_pending(void);
  * @brief 刷新 RAM 缓存到 SD NAND
  */
 void data_cache_flush(void);
+
+void dump_cache_files(void);
+int sdnand_init_mount(void);
 
 /**
  * @brief 获取当前 RAM 缓存偏移量

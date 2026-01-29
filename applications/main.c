@@ -11,129 +11,16 @@
 #include <rtdevice.h>
 #include <board.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <dfs_fs.h>
-#include "drv_spi.h"
-#include "spi_msd.h"
-#include "ntp.h"
 
 #include "main.h"
-#include "tasks/config_thread.h"
 #include "tasks/adc_get_thread.h"
 #include "tasks/adc_send_thread.h"
 #include "hardware/max40109_hal.h"
-#include "services/time_service.h"
-#include "services/sd_spi_switch.h"
 
 #define DBG_TAG "main"
 #define DBG_LVL DBG_LOG
 #include <rtdbg.h>
 
-
-#define CACHE_INDEX_PATH "/cache.idx"
-#define CACHE_DATA_PATH  "/cache_000.dat"
-
-struct cache_index
-{
-    rt_uint32_t magic;
-    rt_uint16_t write_file_idx;
-    rt_uint16_t read_file_idx;
-    rt_uint32_t write_off;
-    rt_uint32_t read_off;
-};
-
-static void dump_cache_files(void)
-{
-    int fd;
-    int i;
-
-    rt_kprintf("\n===== CACHE FILE DUMP =====\n");
-
-    /* 1. Dump cache.idx raw bytes */
-    rt_uint8_t raw[sizeof(struct cache_index)] = {0};
-
-    fd = open(CACHE_INDEX_PATH, O_RDONLY, 0);
-    if (fd < 0)
-    {
-        rt_kprintf("open %s failed\n", CACHE_INDEX_PATH);
-        return;
-    }
-
-    int r = read(fd, raw, sizeof(raw));
-    close(fd);
-
-    rt_kprintf("cache.idx raw (%d bytes):\n", r);
-    for (i = 0; i < r; i++)
-    {
-        rt_kprintf("%02X ", raw[i]);
-    }
-    rt_kprintf("\n");
-
-    /* 2. Parse as structure */
-    struct cache_index idx;
-    rt_memcpy(&idx, raw, sizeof(idx));
-
-    rt_kprintf("parsed cache.idx:\n");
-    rt_kprintf("  magic          = 0x%08X\n", idx.magic);
-    rt_kprintf("  write_file_idx = %u\n", idx.write_file_idx);
-    rt_kprintf("  read_file_idx  = %u\n", idx.read_file_idx);
-    rt_kprintf("  write_off      = %u\n", idx.write_off);
-    rt_kprintf("  read_off       = %u\n", idx.read_off);
-
-    /* 3. cache_000.dat file size */
-    fd = open(CACHE_DATA_PATH, O_RDONLY, 0);
-    if (fd >= 0)
-    {
-        int size = lseek(fd, 0, SEEK_END);
-        close(fd);
-        rt_kprintf("cache_000.dat size = %d bytes\n", size);
-    }
-    else
-    {
-        rt_kprintf("open %s failed\n", CACHE_DATA_PATH);
-    }
-
-    rt_kprintf("===== END DUMP =====\n\n");
-}
-
-
-int sdnand_init_mount(void)
-{
-    rt_pin_write(BSP_RFMODPWR_EN_PIN,PIN_HIGH);
-    rt_pin_write(BSP_TFPWR_EN_PIN,PIN_HIGH);
-
-    ts_spi_bus_claim();
-
-    rt_thread_mdelay(100);
-    rt_pin_mode(BSP_SD_CS_PIN,PIN_MODE_OUTPUT);
-    rt_err_t res = rt_hw_spi_device_attach("spi3", "spi30", SD_CS_GPIO_Port, SD_CS_Pin);
-    if(res == RT_EOK ){
-        res = msd_init("sdnand0","spi30");
-    }
-
-    int ret = dfs_mount("sdnand0", "/", "elm", 0, 0);
-
-    if (ret == 0)
-    {
-        LOG_I("FatFS mounted to /");
-    }
-    else
-    {
-        LOG_E("Mount failed! Error code: %d", ret);
-        LOG_W("Retrying mount in 500ms...");
-
-        rt_thread_mdelay(500);
-        if (dfs_mount("sdnand0", "/", "elm", 0, 0) == 0) {
-            LOG_I("Retry mount success!");
-        } else {
-            LOG_E("Retry mount failed.");
-        }
-    }
-
-    ts_spi_bus_release();
-    return RT_EOK;
-}
-INIT_DEVICE_EXPORT(sdnand_init_mount);
 
 int main(void)
 {
@@ -143,7 +30,6 @@ int main(void)
         rt_kprintf("fail start adc_get_thread\n");
     }
 
-    /* Test code - temporarily disabled*/
     if(adc_send_to_server_start() != RT_EOK){
         rt_kprintf("fail start adc_send_thread\n");
     }
@@ -203,6 +89,8 @@ int main(void)
 
         ts_spi_bus_release();
         */
+
+        /* Test code for ADC value
         double uncal_val = 0.0;
         double cal_val = 0.0;
         double ads_val = 0.0;
@@ -225,6 +113,7 @@ int main(void)
         else b3 = (int)((a3 - ads_val) * 1000);
 
         rt_kprintf("ch6: %d.%03d, %d.%03d, %d.%03d\n", a1, b1, a2, b2, a3, b3);
+        */
 
         rt_thread_mdelay(1000);
 
