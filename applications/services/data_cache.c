@@ -13,11 +13,12 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
-
 #include <unistd.h>
 #include <fcntl.h>
+#include "lfs.h"
 
 #include "data_cache.h"
+#include "adc_packet.h"
 #include "../services/sd_spi_switch.h"
 
 #define DBG_TAG "data_cache"
@@ -25,133 +26,236 @@
 #include <rtdbg.h>
 
 /* 缓存文件配置 */
-#define CACHE_INDEX_PATH      "/cache.idx"
 #define CACHE_FILE_PREFIX     "/cache_"
 #define CACHE_FILE_SUFFIX     ".dat"
 
 #define CACHE_FILE_COUNT      200
 #define CACHE_SEG_SIZE        (16 * 1024 * 1024UL)
-#define CACHE_MAGIC           0xA55A1234
 
 /* RAM 缓存配置 */
-#define RAM_CACHE_SIZE               (32U * 1024U)                    /* 32KB */
-#define CACHE_FLUSH_INTERVAL_TICKS   (rt_tick_from_millisecond(5000)) /* 5s */
+#define RAM_CACHE_SIZE               (32U * 1024U)
+#define CACHE_FLUSH_INTERVAL_TICKS   (rt_tick_from_millisecond(5000))
 
-/* 缓存索引结构 */
-struct cache_index
-{
-    rt_uint32_t magic;
-    rt_uint16_t write_file_idx; /* 当前写入的文件编号 */
-    rt_uint16_t read_file_idx;  /* 当前读取重发的文件编号 */
-    rt_uint32_t write_off;      /* 当前写入的偏移量 */
-    rt_uint32_t read_off;       /* 当前读取的偏移量 */
-};
+/* 内存维护的读写状态 */
+typedef struct {
+    rt_uint32_t write_file_idx;
+    rt_uint32_t write_offset;
+    rt_uint32_t read_file_idx;
+    rt_uint32_t read_offset;
+    rt_uint32_t last_write_seq;
+} cache_state_t;
 
 /* 静态变量 */
-static struct rt_mutex cache_lock; /* 保护索引文件和内存缓冲 */
+static struct rt_mutex cache_lock;
 static rt_uint8_t  sd_cache_ram_buf[RAM_CACHE_SIZE];
 static rt_uint32_t ram_buf_offset = 0;
 static rt_tick_t   last_flush_tick = 0;
+static cache_state_t cache_state;
 
-/* 内部辅助函数 */
-static int write_all(int fd, const rt_uint8_t *buf, rt_uint32_t len)
+/* 辅助函数 */
+static void build_cache_path(char *path, size_t size, rt_uint32_t idx)
 {
-    rt_uint32_t off = 0;
-    while (off < len)
-    {
-        int n = write(fd, buf + off, len - off);
-        if (n <= 0) return -1;
-        off += (rt_uint32_t)n;
-    }
+    rt_snprintf(path, size, "%s%03d%s", CACHE_FILE_PREFIX, (int)idx, CACHE_FILE_SUFFIX);
+}
+
+static int read_packet_header(int fd, rt_uint8_t *status, rt_uint32_t *seq)
+{
+    rt_uint8_t header[7];
+    if (read(fd, header, 7) != 7) return -1;
+
+    if (header[0] != PACKET_FLAG_HEADER_1 || header[1] != PACKET_FLAG_HEADER_2)
+        return -1;
+
+    *status = header[2];
+    memcpy(seq, &header[3], sizeof(rt_uint32_t));
     return 0;
 }
 
-static void save_index_locked(struct cache_index *idx)
+static int update_packet_status(const char *path, rt_uint32_t offset, rt_uint8_t status)
 {
-    int ifd = open(CACHE_INDEX_PATH, O_RDWR | O_CREAT, 0666);
+    int fd = open(path, O_RDWR, 0);
+    if (fd < 0) return -1;
 
-    if (ifd >= 0) {
-        lseek(ifd, 0, SEEK_SET);
-        write_all(ifd, (const rt_uint8_t *)idx, sizeof(struct cache_index));
-        close(ifd);
+    lseek(fd, offset + PACKET_OFFSET_STATUS, SEEK_SET);
+    int ret = write(fd, &status, 1);
+    close(fd);
+
+    return (ret == 1) ? 0 : -1;
+}
+
+/* 二分查找定位未发送数据包 */
+static int binary_search_unsent(rt_uint32_t start_file_idx, rt_uint32_t start_file_offset)
+{
+    return 0;
+}
+
+/* 读取文件指定偏移包序列号 */
+static int get_file_seq_at(rt_uint32_t file_idx, rt_uint8_t packet_offset, rt_uint32_t *seq)
+{
+    char path[32];
+    build_cache_path(path, sizeof(path), file_idx);
+    int fd = open(path, O_RDONLY, 0);
+    if (fd < 0) return -1;
+    if(lseek(fd,packet_offset * ADC_PACKET_SIZE, SEEK_SET) != packet_offset * ADC_PACKET_SIZE) return -1;
+
+    rt_uint8_t status;
+    int ret = read_packet_header(fd, &status, seq);
+    close(fd);
+    return ret;
+}
+
+/* 二分查找最后一个存在的文件 */
+static rt_uint32_t find_last_existing_file(void)
+{
+    rt_uint32_t left = 0, right = CACHE_FILE_COUNT - 1, result = 0;
+
+    while (left <= right) {
+        rt_uint32_t mid = (left + right) / 2;
+        rt_uint32_t seq;
+
+        if (get_file_seq(mid, &seq) == 0) {
+            result = mid;
+            left = mid + 1;
+        } else {
+            right = mid - 1;
+        }
     }
+
+    return result;
 }
 
-static int load_index_locked(struct cache_index *idx)
+/* 查找环形缓存的起始文件位置 */
+static int find_ring_start(rt_uint32_t *start_file)
 {
-    int ifd = open(CACHE_INDEX_PATH, O_RDWR | O_CREAT, 0666);
+    rt_uint32_t last_file = find_last_existing_file();
+    rt_uint32_t first_seq, last_seq;
 
-    if (ifd < 0) return -1;
-    int res = read(ifd, idx, sizeof(struct cache_index));
-    close(ifd);
-    if (res == sizeof(struct cache_index) && idx->magic == CACHE_MAGIC) return 0;
-    return -1;
+    if (get_file_seq_at(0, 0, &first_seq) < 0) {
+        *start_file = 0;
+        return 0;
+    }
+
+    if (last_file == 0 || get_file_seq_at(last_file, 0, &last_seq) < 0 || first_seq <= last_seq) {
+        *start_file = 0;
+        return 0;
+    }
+
+    rt_uint32_t left = 0, right = last_file;
+
+    while (right - left > 10) {
+        rt_uint32_t mid = (left + right) / 2;
+        rt_uint32_t mid_seq;
+
+        if (get_file_seq_at(mid, 0, &mid_seq) < 0 || mid_seq < first_seq) {
+            right = mid;
+        } else {
+            left = mid;
+        }
+    }
+
+    for (rt_uint32_t i = left; i < right; i++) {
+        rt_uint32_t curr_seq, next_seq;
+        if (get_file_seq_at(i, 0, &curr_seq) == 0 && get_file_seq_at(i + 1, 0, &next_seq) == 0) {
+            if (next_seq < curr_seq) {
+                *start_file = i + 1;
+                return 0;
+            }
+        }
+    }
+
+    *start_file = 0;
+    return 0;
 }
 
+static int find_start_offset(rt_uint32_t idx, rt_uint32_t *start_offset)
+{
+    char path[32];
+    build_cache_path(path, sizeof(path), idx);
+    int fd = open(path, O_RDONLY, 0);
+    if (fd < 0) return -1;
+    off_t file_size = lseek(fd, 0, SEEK_END);
+    close(fd);
+    if (file_size < 0) return -1;
+
+    uint32_t n_packets = (uint32_t)(file_size / ADC_PACKET_SIZE);
+    if (n_packets == 0) { *start_offset = 0; return 0; }
+
+    uint32_t base_seq;
+    if (get_file_seq_at(idx, 0, &base_seq) != 0) return -1;
+
+    uint32_t left = 0;
+    uint32_t right = n_packets;
+
+    while (left < right) {
+        uint32_t mid = left + (right - left) / 2;
+
+        uint32_t s;
+        if (get_file_seq_at(idx, mid, &s) != 0) return -1;
+
+        if (s < base_seq) {
+            right = mid;
+        } else {
+            left = mid + 1;
+        }
+    }
+    *start_offset = (left == n_packets) ? 0 : left * ADC_PACKET_SIZE;
+    return 0;
+}
+
+/* 初始化时恢复读写状态 */
+static int recover_cache_state(void)
+{
+    rt_uint32_t ring_start_file = 0, ring_start_offset = 0;
+    find_ring_start(&ring_start_file);
+    cache_state.write_file_idx = ring_start_file;
+
+    find_start_offset(ring_start_file, &ring_start_offset);
+    cache_state.write_offset = ring_start_offset;
+
+    /* 二分查找未发送数据包 */
+    binary_search_unsent(ring_start_file, ring_start_offset);
+
+    cache_state.read_file_idx = 0;
+    cache_state.read_offset = 0;
+    cache_state.last_write_seq = 0;
+
+    LOG_I("Cache recovered: write[%d:%d] read[%d:%d]",
+          cache_state.write_file_idx, cache_state.write_offset,
+          cache_state.read_file_idx, cache_state.read_offset);
+
+    return 0;
+}
+
+/* 写入数据到SD */
 static int cache_write_blob_locked(const rt_uint8_t *data, rt_uint32_t len)
 {
-    struct cache_index idx, new_idx;
+    rt_uint32_t written = 0;
 
-    if (load_index_locked(&idx) < 0)
-    {
-        rt_memset(&idx, 0, sizeof(idx));
-        idx.magic = CACHE_MAGIC;
-    }
-
-    new_idx = idx;
-    rt_uint16_t cur_idx = new_idx.write_file_idx;
-    rt_uint32_t cur_off = new_idx.write_off;
-
-    const rt_uint8_t *p = data;
-    rt_uint32_t remain = len;
-
-    while (remain > 0)
-    {
-        rt_uint32_t space = CACHE_SEG_SIZE - cur_off;
-        if (space == 0)
-        {
-            cur_idx = (rt_uint16_t)((cur_idx + 1) % CACHE_FILE_COUNT);
-            cur_off = 0;
-            space = CACHE_SEG_SIZE;
-        }
-
-        rt_uint32_t chunk = (remain <= space) ? remain : space;
-
+    while (written < len) {
         char path[32];
-        rt_snprintf(path, sizeof(path), "%s%03d%s", CACHE_FILE_PREFIX, (int)cur_idx, CACHE_FILE_SUFFIX);
+        build_cache_path(path, sizeof(path), cache_state.write_file_idx);
 
-        int dfd = open(path, O_RDWR | O_CREAT, 0666);
-        if (dfd < 0)
-        {
-            rt_kprintf("[Cache] open %s failed\n", path);
-            return -1;
+        rt_uint32_t remain = len - written;
+        rt_uint32_t space = CACHE_SEG_SIZE - cache_state.write_offset;
+        rt_uint32_t chunk = (remain < space) ? remain : space;
+
+        int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0);
+        if (fd < 0) return -1;
+
+        int n = write(fd, data + written, chunk);
+        close(fd);
+
+        if (n <= 0) return -1;
+
+        written += n;
+        cache_state.write_offset += n;
+
+        if (cache_state.write_offset >= CACHE_SEG_SIZE) {
+            cache_state.write_file_idx = (cache_state.write_file_idx + 1) % CACHE_FILE_COUNT;
+            cache_state.write_offset = 0;
         }
-
-        if (lseek(dfd, cur_off, SEEK_SET) < 0)
-        {
-            rt_kprintf("[Cache] lseek failed\n");
-            close(dfd);
-            return -1;
-        }
-
-        if (write_all(dfd, p, chunk) < 0)
-        {
-            rt_kprintf("[Cache] write_all failed\n");
-            close(dfd);
-            return -1;
-        }
-
-        close(dfd);
-
-        p += chunk;
-        remain -= chunk;
-        cur_off += chunk;
     }
 
-    new_idx.write_file_idx = cur_idx;
-    new_idx.write_off      = cur_off;
-
-    save_index_locked(&new_idx);
     return 0;
 }
 
@@ -172,6 +276,13 @@ int data_cache_init(void)
     rt_mutex_init(&cache_lock, "cache_mtx", RT_IPC_FLAG_PRIO);
     ram_buf_offset = 0;
     last_flush_tick = 0;
+
+    rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
+    ts_spi_bus_claim();
+    recover_cache_state();
+    ts_spi_bus_release();
+    rt_mutex_release(&cache_lock);
+
     return 0;
 }
 
@@ -184,7 +295,6 @@ int data_cache_write(const uint8_t *data, uint32_t len)
         last_flush_tick = rt_tick_get();
     }
 
-    /* 如果数据超过 RAM 缓存大小，直接写入 SD */
     if (len > RAM_CACHE_SIZE)
     {
         rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
@@ -194,7 +304,6 @@ int data_cache_write(const uint8_t *data, uint32_t len)
         rt_mutex_release(&cache_lock);
         return ret;
     }
-    /* 如果 RAM 缓存不够，先刷新 */
     else if (ram_buf_offset + len > RAM_CACHE_SIZE)
     {
         rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
@@ -205,17 +314,15 @@ int data_cache_write(const uint8_t *data, uint32_t len)
     }
 
     rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
-    if (ram_buf_offset + len > RAM_CACHE_SIZE)
+    if (ram_buf_offset + len <= RAM_CACHE_SIZE)
     {
-        /* 写入 RAM 缓存 */
         memcpy(sd_cache_ram_buf + ram_buf_offset, data, len);
         ram_buf_offset += len;
     }
     else{
-        rt_kprintf("[W/data_cache]RAM is full, some data is missing.");
+        LOG_W("RAM is full, some data is missing.");
     }
 
-    /* 检查是否需要定时刷新 */
     if (rt_tick_get() - last_flush_tick >= CACHE_FLUSH_INTERVAL_TICKS)
     {
         ts_spi_bus_claim();
@@ -229,60 +336,45 @@ int data_cache_write(const uint8_t *data, uint32_t len)
 
 int data_cache_read(uint8_t *buffer, uint32_t buffer_size)
 {
-    struct cache_index idx;
-    uint32_t total_read = 0;
+    rt_uint32_t total_read = 0;
 
     if (!buffer || buffer_size == 0) return -1;
 
     rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
     ts_spi_bus_claim();
 
-    if (load_index_locked(&idx) < 0) {
-        goto _exit;
-    }
-
     while (total_read < buffer_size)
     {
-        if (idx.read_file_idx == idx.write_file_idx && idx.read_off == idx.write_off) {
+        if (cache_state.read_file_idx == cache_state.write_file_idx &&
+            cache_state.read_offset == cache_state.write_offset) {
             break;
         }
-        uint32_t file_remain = 0;
-        if (idx.read_file_idx == idx.write_file_idx) {
-            if (idx.write_off < idx.read_off) {
-                rt_kprintf("[W/data_cache]write_off < read_off\n");
-                break;
-            }
-            file_remain = idx.write_off - idx.read_off;
-        } else {
-            file_remain = CACHE_SEG_SIZE - idx.read_off;
-        }
-        uint32_t need_read = buffer_size - total_read;
-        uint32_t chunk = (need_read < file_remain) ? need_read : file_remain;
 
         char path[32];
-        rt_snprintf(path, sizeof(path), "%s%03d%s", CACHE_FILE_PREFIX, (int)idx.read_file_idx, CACHE_FILE_SUFFIX);
+        build_cache_path(path, sizeof(path), cache_state.read_file_idx);
 
         int fd = open(path, O_RDONLY, 0);
-        if (fd >= 0) {
-            lseek(fd, idx.read_off, SEEK_SET);
-            int n = read(fd, buffer + total_read, chunk);
-            close(fd);
+        if (fd < 0) break;
 
-            if (n <= 0) break;
+        lseek(fd, cache_state.read_offset, SEEK_SET);
 
-            total_read += n;
-            idx.read_off += n;
+        rt_uint32_t need = buffer_size - total_read;
+        rt_uint32_t chunk = (need < ADC_PACKET_MAX_SIZE) ? need : ADC_PACKET_MAX_SIZE;
 
-            if (idx.read_off >= CACHE_SEG_SIZE) {
-                idx.read_off = 0;
-                idx.read_file_idx = (idx.read_file_idx + 1) % CACHE_FILE_COUNT;
-            }
-        } else {
-            break;
+        int n = read(fd, buffer + total_read, chunk);
+        close(fd);
+
+        if (n <= 0) break;
+
+        total_read += n;
+        cache_state.read_offset += n;
+
+        if (cache_state.read_offset >= CACHE_SEG_SIZE) {
+            cache_state.read_offset = 0;
+            cache_state.read_file_idx = (cache_state.read_file_idx + 1) % CACHE_FILE_COUNT;
         }
     }
 
-_exit:
     ts_spi_bus_release();
     rt_mutex_release(&cache_lock);
 
@@ -291,27 +383,14 @@ _exit:
 
 int data_cache_commit_read(uint32_t len)
 {
-    struct cache_index idx;
-
-    if (len == 0) return -1;
+    if (len == 0) return 0;
 
     rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
     ts_spi_bus_claim();
 
-    if (load_index_locked(&idx) < 0)
-    {
-        ts_spi_bus_release();
-        rt_mutex_release(&cache_lock);
-        return -1;
-    }
-
-    idx.read_off += len;
-    while (idx.read_off >= CACHE_SEG_SIZE) {
-        idx.read_off -= CACHE_SEG_SIZE;
-        idx.read_file_idx = (idx.read_file_idx + 1) % CACHE_FILE_COUNT;
-    }
-
-    save_index_locked(&idx);
+    char path[32];
+    build_cache_path(path, sizeof(path), cache_state.read_file_idx);
+    update_packet_status(path, cache_state.read_offset - len, PACKET_FLAG_STATUS_SENT);
 
     ts_spi_bus_release();
     rt_mutex_release(&cache_lock);
@@ -321,22 +400,11 @@ int data_cache_commit_read(uint32_t len)
 
 bool data_cache_has_pending(void)
 {
-    struct cache_index idx;
     bool has_data;
 
     rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
-    ts_spi_bus_claim();
-
-    if (load_index_locked(&idx) < 0)
-    {
-        has_data = false;
-    }
-    else
-    {
-        has_data = !(idx.read_file_idx == idx.write_file_idx && idx.read_off == idx.write_off);
-    }
-
-    ts_spi_bus_release();
+    has_data = !(cache_state.read_file_idx == cache_state.write_file_idx &&
+                 cache_state.read_offset == cache_state.write_offset);
     rt_mutex_release(&cache_lock);
 
     return has_data;
@@ -350,7 +418,7 @@ void data_cache_flush(void)
         rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
         ts_spi_bus_claim();
 
-        flush_ram_cache_to_sd(); // 这里的内部实现会更新 last_flush_tick
+        flush_ram_cache_to_sd();
 
         ts_spi_bus_release();
         rt_mutex_release(&cache_lock);
@@ -362,48 +430,11 @@ uint32_t data_cache_get_ram_usage(void)
     return ram_buf_offset;
 }
 
-
 void dump_cache_files(void)
 {
-    int fd;
-    int i;
-    rt_uint8_t raw[sizeof(struct cache_index)] = {0};
-
-    rt_kprintf("\n===== CACHE FILE DUMP =====\n");
-
-    ts_spi_bus_claim();
-    fd = open(CACHE_INDEX_PATH, O_RDONLY, 0);
-    if (fd < 0)
-    {
-        rt_kprintf("open %s failed\n", CACHE_INDEX_PATH);
-        ts_spi_bus_release();
-        return;
-    }
-
-    int r = read(fd, raw, sizeof(raw));
-    close(fd);
-
-    rt_kprintf("cache.idx raw (%d bytes):\n", r);
-    for (i = 0; i < r; i++)
-    {
-        rt_kprintf("%02X ", raw[i]);
-    }
-    rt_kprintf("\n");
-
-    /* 2. Parse as structure */
-    struct cache_index idx;
-    rt_memcpy(&idx, raw, sizeof(idx));
-
-    rt_kprintf("parsed cache.idx:\n");
-    rt_kprintf("  magic          = 0x%08X\n", idx.magic);
-    rt_kprintf("  write_file_idx = %u\n", idx.write_file_idx);
-    rt_kprintf("  read_file_idx  = %u\n", idx.read_file_idx);
-    rt_kprintf("  write_off      = %u\n", idx.write_off);
-    rt_kprintf("  read_off       = %u\n", idx.read_off);
-
-    rt_kprintf("===== END DUMP =====\n\n");
-
-    ts_spi_bus_release();
+    rt_kprintf("Cache State:\n");
+    rt_kprintf("  Write: file[%d] offset[%d]\n", cache_state.write_file_idx, cache_state.write_offset);
+    rt_kprintf("  Read:  file[%d] offset[%d]\n", cache_state.read_file_idx, cache_state.read_offset);
 }
 
 int sdnand_init_mount(void)
@@ -420,24 +451,32 @@ int sdnand_init_mount(void)
         res = msd_init("sdnand0","spi30");
     }
 
-    int ret = dfs_mount("sdnand0", "/", "elm", 0, 0);
+    int ret = dfs_mount("sdnand0", "/", "lfs", 0, 0);
 
     if (ret == 0)
-    {
-        LOG_I("FatFS mounted to /");
-    }
-    else
-    {
-        LOG_E("Mount failed! Error code: %d", ret);
-        LOG_W("Retrying mount in 500ms...");
-
-        rt_thread_mdelay(500);
-        if (dfs_mount("sdnand0", "/", "elm", 0, 0) == 0) {
-            LOG_I("Retry mount success!");
-        } else {
-            LOG_E("Retry mount failed.");
+        {
+            LOG_I("littleFS mounted to /");
         }
-    }
+        else
+        {
+            LOG_E("Mount failed! Error code: %d", ret);
+            LOG_W("Attempting to format 'sdnand0' with littleFS...");
+
+            if (dfs_mkfs("lfs", "sdnand0") == 0)
+            {
+                LOG_I("Format success, retrying mount...");
+                rt_thread_mdelay(100);
+                if (dfs_mount("sdnand0", "/", "lfs", 0, 0) == 0) {
+                    LOG_I("Retry mount success!");
+                } else {
+                    LOG_E("Retry mount failed after format.");
+                }
+            }
+            else
+            {
+                LOG_E("Format failed! Please check if the device supports MTD or block access.");
+            }
+        }
 
     ts_spi_bus_release();
     return RT_EOK;

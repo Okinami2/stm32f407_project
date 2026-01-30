@@ -15,17 +15,12 @@
 #include "adc_packet.h"
 #include "../tasks/adc_get_thread.h"
 
-/* 包头标志 */
-#define PACKET_FLAG_HEADER_1    0xAA
-#define PACKET_FLAG_HEADER_2    0x55
-#define PACKET_FLAG_TAIL_1      0x0D
-#define PACKET_FLAG_TAIL_2      0x0A
-
+rt_uint32_t g_sequence_id = 0;
 
 uint32_t adc_packet_pack(uint8_t *buffer, uint32_t buffer_size, uint16_t start_index)
 {
     uint32_t offset = 0;
-    uint32_t full_len = (BATCH_SIZE * (8 * sizeof(float)) + sizeof(sys_calendar_time_t) + sizeof(rt_uint8_t)) + 4;
+    uint32_t full_len = ADC_PACKET_SIZE;
     uint8_t ts_idx = (start_index == 0) ? 0 : 1;
 
     if (!buffer || buffer_size < full_len)
@@ -36,6 +31,14 @@ uint32_t adc_packet_pack(uint8_t *buffer, uint32_t buffer_size, uint16_t start_i
     /* 添加包头 */
     buffer[offset++] = PACKET_FLAG_HEADER_1;
     buffer[offset++] = PACKET_FLAG_HEADER_2;
+
+    /* 添加状态 */
+    buffer[offset++] = PACKET_FLAG_STATUS_WATTING;
+
+    /* 添加序列号 */
+    rt_uint32_t seq = g_sequence_id++;
+    memcpy(&buffer[offset], &seq, sizeof(rt_uint32_t));
+    offset += sizeof(rt_uint32_t);
 
     /* 添加时间戳 */
     memcpy(&buffer[offset], &adc_receive_buffer.start_time[ts_idx], sizeof(sys_calendar_time_t));

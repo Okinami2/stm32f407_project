@@ -36,14 +36,26 @@ typedef struct {
 extern rt_sem_t adc_get_done_sem;
 extern ADC_Receive_Buffer adc_receive_buffer;
 extern bool receive_buff_flag;
+extern rt_uint32_t g_sequence_id;
 
-/* 协议定义 */
-#define PACKET_HEADER_SIZE      4   /* AA 55 + 时间戳(2B) + 采样率(1B) = 实际上是动态的 */
-#define PACKET_TAIL_SIZE        2   /* 0D 0A */
+/* 包头标志 */
+#define PACKET_FLAG_HEADER_1        0x55
+#define PACKET_FLAG_HEADER_2        0xAA
+#define PACKET_FLAG_STATUS_EMPTY    0xFF
+#define PACKET_FLAG_STATUS_WATTING  0xAA
+#define PACKET_FLAG_STATUS_SENT     0xBB
+#define PACKET_FLAG_TAIL_1          0x0D
+#define PACKET_FLAG_TAIL_2          0x0A
+
+/* 包结构偏移 */
+#define PACKET_OFFSET_HEADER        0
+#define PACKET_OFFSET_STATUS        2
+#define PACKET_OFFSET_SEQUENCE      3
+#define PACKET_OFFSET_PAYLOAD       7
 
 /* 最大数据包大小 (用于缓冲区分配) */
-#define ADC_PACKET_MAX_SIZE     (BATCH_SIZE * 8 * sizeof(float) + sizeof(sys_calendar_time_t) + sizeof(rt_uint8_t) + 4)
-#define ADC_RESENT_PACKET_NUM   5 /* 一次重发的数量 */
+#define ADC_PACKET_SIZE     (BATCH_SIZE * 8 * sizeof(float) + sizeof(sys_calendar_time_t) + sizeof(rt_uint8_t) + 9)
+#define ADC_RESENT_PACKET_NUM   5
 /**
  * @brief 计算 ADC 数据包的总长度
  * @return 数据包字节数
