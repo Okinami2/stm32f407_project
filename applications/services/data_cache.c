@@ -196,7 +196,7 @@ static int binary_search_unsent(rt_uint32_t start_file_idx, rt_uint32_t end_file
     }
 
     if(left == end_file_idx + CACHE_FILE_COUNT){
-        *read_file_idx = start_file_idx;
+        *read_file_idx = end_file_idx;
     }
     else{
         *read_file_idx = (left-1) % CACHE_FILE_COUNT;
@@ -206,7 +206,7 @@ static int binary_search_unsent(rt_uint32_t start_file_idx, rt_uint32_t end_file
         return -1;
     }
 
-    if(*read_offset == (CACHE_SEG_NUM - 1) * ADC_PACKET_SIZE){
+    if(*read_offset >= (CACHE_SEG_NUM - 1) * ADC_PACKET_SIZE){
         *read_file_idx += 1;
         *read_offset = 0;
     }
@@ -362,7 +362,7 @@ static int recover_cache_state(void)
     rt_uint32_t seq = 0;
     rt_uint32_t last_file_idx = find_last_existing_file();
 
-    if(last_file_idx < CACHE_FILE_COUNT){
+    if(last_file_idx < CACHE_FILE_COUNT - 1){
         write_file_idx = last_file_idx;
         find_start_offset_and_seq(last_file_idx, &write_offset, &seq);
         binary_search_unsent(0, last_file_idx, &read_file_idx, &read_offset);
@@ -409,9 +409,12 @@ static int cache_write_blob_locked(const rt_uint8_t *data, rt_uint32_t len)
         rt_uint32_t space = CACHE_SEG_SIZE - cache_state.write_offset;
         rt_uint32_t chunk = (remain < space) ? remain : space;
 
-        int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0);
+        int fd = open(path, O_WRONLY | O_CREAT, 0);
         if (fd < 0) return -1;
-
+        if(lseek(fd, cache_state.write_offset,SEEK_SET) < 0){
+            close(fd);
+            return 1;
+        }
         int n = write(fd, data + written, chunk);
         close(fd);
 
@@ -507,6 +510,8 @@ int data_cache_write(const uint8_t *data, uint32_t len)
 int data_cache_read(uint8_t *buffer, uint32_t buffer_size)
 {
     rt_uint32_t total_read = 0;
+    rt_uint32_t shadow_read_offset = cache_state.read_offset;
+    rt_uint32_t shadow_read_file_idx = cache_state.read_file_idx;
 
     if (!buffer || buffer_size == 0) return -1;
 
@@ -515,18 +520,18 @@ int data_cache_read(uint8_t *buffer, uint32_t buffer_size)
 
     while (total_read < buffer_size)
     {
-        if (cache_state.read_file_idx == cache_state.write_file_idx &&
-            cache_state.read_offset == cache_state.write_offset) {
+        if (shadow_read_file_idx == cache_state.write_file_idx &&
+            shadow_read_offset == cache_state.write_offset) {
             break;
         }
 
         char path[32];
-        build_cache_path(path, sizeof(path), cache_state.read_file_idx);
+        build_cache_path(path, sizeof(path), shadow_read_file_idx);
 
         int fd = open(path, O_RDONLY, 0);
         if (fd < 0) break;
 
-        lseek(fd, cache_state.read_offset, SEEK_SET);
+        lseek(fd, shadow_read_offset, SEEK_SET);
 
         rt_uint32_t need = buffer_size - total_read;
         rt_uint32_t chunk = (need < ADC_PACKET_SIZE) ? need : ADC_PACKET_SIZE;
@@ -537,11 +542,10 @@ int data_cache_read(uint8_t *buffer, uint32_t buffer_size)
         if (n <= 0) break;
 
         total_read += n;
-        cache_state.read_offset += n;
-
-        if (cache_state.read_offset >= CACHE_SEG_SIZE) {
-            cache_state.read_offset = 0;
-            cache_state.read_file_idx = (cache_state.read_file_idx + 1) % CACHE_FILE_COUNT;
+        shadow_read_offset += n;
+        if (shadow_read_offset >= CACHE_SEG_SIZE) {
+            shadow_read_offset = 0;
+            shadow_read_file_idx = (shadow_read_file_idx + 1) % CACHE_FILE_COUNT;
         }
     }
 
@@ -560,7 +564,12 @@ int data_cache_commit_read(uint32_t len)
 
     char path[32];
     build_cache_path(path, sizeof(path), cache_state.read_file_idx);
-    update_packet_status_at(path, cache_state.read_offset - len, PACKET_FLAG_STATUS_SENT);
+    update_packet_status_at(path, cache_state.read_offset, PACKET_FLAG_STATUS_SENT);
+    cache_state.read_offset += len;
+    if (cache_state.read_offset >= CACHE_SEG_SIZE) {
+        cache_state.read_offset = 0;
+        cache_state.read_file_idx = (cache_state.read_file_idx + 1) % CACHE_FILE_COUNT;
+    }
 
     ts_spi_bus_release();
     rt_mutex_release(&cache_lock);
