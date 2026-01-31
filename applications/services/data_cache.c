@@ -6,6 +6,7 @@
  * Change Logs:
  * Date           Author       Notes
  * 2025-11-19     GreatMagicianGarfiel       the first version
+ * 2026-01-30     GreatMagicianGarfiel       refactor to distributed littleFS
  */
 
 #include <rtthread.h>
@@ -15,7 +16,6 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include "lfs.h"
 
 #include "data_cache.h"
 #include "adc_packet.h"
@@ -29,8 +29,9 @@
 #define CACHE_FILE_PREFIX     "/cache_"
 #define CACHE_FILE_SUFFIX     ".dat"
 
-#define CACHE_FILE_COUNT      200
-#define CACHE_SEG_SIZE        (16 * 1024 * 1024UL)
+#define CACHE_FILE_COUNT        200
+#define CACHE_SEG_NUM           8000
+#define CACHE_SEG_SIZE        (ADC_PACKET_SIZE * CACHE_SEG_NUM)
 
 /* RAM 缓存配置 */
 #define RAM_CACHE_SIZE               (32U * 1024U)
@@ -58,10 +59,10 @@ static void build_cache_path(char *path, size_t size, rt_uint32_t idx)
     rt_snprintf(path, size, "%s%03d%s", CACHE_FILE_PREFIX, (int)idx, CACHE_FILE_SUFFIX);
 }
 
-static int read_packet_header(int fd, rt_uint8_t *status, rt_uint32_t *seq)
+static int read_packet_header_at(int fd, rt_uint32_t offset, rt_uint8_t *status, rt_uint32_t *seq)
 {
     rt_uint8_t header[7];
-    if (read(fd, header, 7) != 7) return -1;
+    if (lseek(fd, offset, SEEK_SET) < 0 || read(fd, header, 7) != 7) return -1;
 
     if (header[0] != PACKET_FLAG_HEADER_1 || header[1] != PACKET_FLAG_HEADER_2)
         return -1;
@@ -71,7 +72,7 @@ static int read_packet_header(int fd, rt_uint8_t *status, rt_uint32_t *seq)
     return 0;
 }
 
-static int update_packet_status(const char *path, rt_uint32_t offset, rt_uint8_t status)
+static int update_packet_status_at(const char *path, rt_uint32_t offset, rt_uint8_t status)
 {
     int fd = open(path, O_RDWR, 0);
     if (fd < 0) return -1;
@@ -83,23 +84,145 @@ static int update_packet_status(const char *path, rt_uint32_t offset, rt_uint8_t
     return (ret == 1) ? 0 : -1;
 }
 
-/* 二分查找定位未发送数据包 */
-static int binary_search_unsent(rt_uint32_t start_file_idx, rt_uint32_t start_file_offset)
+static int binary_search_unsent_offset(rt_uint32_t idx, rt_uint32_t *offset)
 {
+    char path[32] = {0};
+    rt_uint32_t left = 0;
+    build_cache_path(path, sizeof(path),idx);
+    int fd = open(path,O_RDONLY, 0);
+    if(fd < 0) return -1;
+
+    off_t size = lseek(fd,0,SEEK_END);
+    if(size < 0){
+        close(fd);
+        return -1;
+    }
+
+    rt_uint32_t right = size / ADC_PACKET_SIZE;
+
+    rt_uint8_t left_state, mid_state;
+    rt_uint32_t seq;
+    read_packet_header_at(fd, left * ADC_PACKET_SIZE, &left_state, &seq);
+    if(left_state == PACKET_FLAG_STATUS_WATTING){
+        close(fd);
+        *offset = 0;
+        return 0;
+    }
+    else if(left_state != PACKET_FLAG_STATUS_SENT){
+        close(fd);
+        return -1;
+    }
+
+    while(left < right){
+        rt_uint32_t mid = left + (right - left) / 2 ;
+        if(read_packet_header_at(fd, mid * ADC_PACKET_SIZE, &mid_state, &seq) < 0){
+            close(fd);
+            return -1;
+        }
+
+        if(mid_state == PACKET_FLAG_STATUS_SENT){
+            left = mid +1;
+        }
+        else if(mid_state == PACKET_FLAG_STATUS_WATTING){
+            right = mid;
+        }
+        else{
+            close(fd);
+            return -1;
+        }
+    }
+
+    *offset = left * ADC_PACKET_SIZE;
+    close(fd);
+    return 0;
+}
+
+/* 二分查找定位未发送数据包 */
+static int binary_search_unsent(rt_uint32_t start_file_idx, rt_uint32_t end_file_idx,
+                                rt_uint32_t *read_file_idx, rt_uint32_t *read_offset)
+{
+    rt_uint32_t left = 0, right = 0;
+
+    if(start_file_idx < end_file_idx) /*未发生回绕*/
+    {
+        left = start_file_idx;
+        right = end_file_idx;
+    }
+    else { /*发生了回绕*/
+        left = start_file_idx;
+        right = end_file_idx + CACHE_FILE_COUNT;
+    }
+    char left_path[32] = { 0 };
+    char mid_path[32] = { 0 };
+    rt_uint8_t left_state,mid_state;
+    rt_uint32_t seq;
+
+    build_cache_path(left_path, sizeof(left_path), left % CACHE_FILE_COUNT);
+    int fd = open(left_path,O_RDONLY, 0);
+    if(fd < 0) return -1;
+    if(read_packet_header_at(fd, 0, &left_state, &seq) < 0){
+        close(fd);
+        return -1;
+    }
+    close(fd);
+
+    if (left_state == PACKET_FLAG_STATUS_WATTING) {
+        *read_file_idx = left;
+        *read_offset = 0;
+        return 0;
+    }
+
+    while(left < right){
+        rt_uint32_t mid = left + (right - left) / 2 ;
+
+        build_cache_path(mid_path, sizeof(mid_path), mid % CACHE_FILE_COUNT);
+        fd = open(mid_path,O_RDONLY, 0);
+        if(fd < 0) return -1;
+        if(read_packet_header_at(fd, 0, &mid_state, &seq) < 0){
+            close(fd);
+            return -1;
+        }
+        close(fd);
+
+        if(mid_state == PACKET_FLAG_STATUS_SENT){
+            left = mid +1;
+        }
+        else if(mid_state == PACKET_FLAG_STATUS_WATTING){
+            right = mid;
+        }
+        else{
+            return -1;
+        }
+    }
+
+    if(left == end_file_idx + CACHE_FILE_COUNT){
+        *read_file_idx = start_file_idx;
+    }
+    else{
+        *read_file_idx = (left-1) % CACHE_FILE_COUNT;
+    }
+
+    if(binary_search_unsent_offset(*read_file_idx,read_offset) < 0){
+        return -1;
+    }
+
+    if(*read_offset == (CACHE_SEG_NUM - 1) * ADC_PACKET_SIZE){
+        *read_file_idx += 1;
+        *read_offset = 0;
+    }
+
     return 0;
 }
 
 /* 读取文件指定偏移包序列号 */
-static int get_file_seq_at(rt_uint32_t file_idx, rt_uint8_t packet_offset, rt_uint32_t *seq)
+static int get_file_seq_at(rt_uint32_t file_idx, rt_uint8_t offset, rt_uint32_t *seq)
 {
     char path[32];
     build_cache_path(path, sizeof(path), file_idx);
     int fd = open(path, O_RDONLY, 0);
     if (fd < 0) return -1;
-    if(lseek(fd,packet_offset * ADC_PACKET_SIZE, SEEK_SET) != packet_offset * ADC_PACKET_SIZE) return -1;
-
     rt_uint8_t status;
-    int ret = read_packet_header(fd, &status, seq);
+    int ret = read_packet_header_at(fd, offset, &status, seq);
     close(fd);
     return ret;
 }
@@ -113,7 +236,7 @@ static rt_uint32_t find_last_existing_file(void)
         rt_uint32_t mid = (left + right) / 2;
         rt_uint32_t seq;
 
-        if (get_file_seq(mid, &seq) == 0) {
+        if (get_file_seq_at(mid, 0, &seq) == 0) {
             result = mid;
             left = mid + 1;
         } else {
@@ -167,21 +290,32 @@ static int find_ring_start(rt_uint32_t *start_file)
     return 0;
 }
 
-static int find_start_offset(rt_uint32_t idx, rt_uint32_t *start_offset)
+static int find_start_offset_and_seq(rt_uint32_t idx, rt_uint32_t *start_offset, rt_uint32_t *seq)
 {
-    char path[32];
+    char path[32] = { 0 };
     build_cache_path(path, sizeof(path), idx);
-    int fd = open(path, O_RDONLY, 0);
-    if (fd < 0) return -1;
+    int fd = open(path,O_RDONLY,0);
+    if(fd < 0) return -1;
+
     off_t file_size = lseek(fd, 0, SEEK_END);
-    close(fd);
-    if (file_size < 0) return -1;
+    if (file_size < 0) {
+        close(fd);
+        return -1;
+    }
 
-    uint32_t n_packets = (uint32_t)(file_size / ADC_PACKET_SIZE);
-    if (n_packets == 0) { *start_offset = 0; return 0; }
+    rt_uint32_t n_packets = (rt_uint32_t)(file_size / ADC_PACKET_SIZE);
+    if (n_packets == 0) {
+        *start_offset = 0;
+        close(fd);
+        return 0;
+    }
 
-    uint32_t base_seq;
-    if (get_file_seq_at(idx, 0, &base_seq) != 0) return -1;
+    rt_uint8_t status;
+    rt_uint32_t start_seq;
+    if(read_packet_header_at(fd, 0, &status, &start_seq) < 0){
+        close(fd);
+        return -1;
+    }
 
     uint32_t left = 0;
     uint32_t right = n_packets;
@@ -190,15 +324,32 @@ static int find_start_offset(rt_uint32_t idx, rt_uint32_t *start_offset)
         uint32_t mid = left + (right - left) / 2;
 
         uint32_t s;
-        if (get_file_seq_at(idx, mid, &s) != 0) return -1;
+        if(read_packet_header_at(fd, mid * ADC_PACKET_SIZE, &status, &s) < 0){
+            close(fd);
+            return -1;
+        }
 
-        if (s < base_seq) {
+        if (s < start_seq) {
             right = mid;
         } else {
             left = mid + 1;
         }
     }
+
+    uint32_t last_idx;
+    if (left == n_packets) {
+        last_idx = n_packets - 1;
+    } else {
+        last_idx = (left == 0) ? 0 : left - 1;
+    }
+
+    if (read_packet_header_at(fd, last_idx*ADC_PACKET_SIZE, &status, seq) < 0) {
+        close(fd);
+        return -1;
+    }
+
     *start_offset = (left == n_packets) ? 0 : left * ADC_PACKET_SIZE;
+    close(fd);
     return 0;
 }
 
@@ -206,18 +357,37 @@ static int find_start_offset(rt_uint32_t idx, rt_uint32_t *start_offset)
 static int recover_cache_state(void)
 {
     rt_uint32_t ring_start_file = 0, ring_start_offset = 0;
-    find_ring_start(&ring_start_file);
-    cache_state.write_file_idx = ring_start_file;
+    rt_uint32_t write_file_idx, write_offset;
+    rt_uint32_t read_file_idx, read_offset;
+    rt_uint32_t seq = 0;
+    rt_uint32_t last_file_idx = find_last_existing_file();
 
-    find_start_offset(ring_start_file, &ring_start_offset);
-    cache_state.write_offset = ring_start_offset;
+    if(last_file_idx < CACHE_FILE_COUNT){
+        write_file_idx = last_file_idx;
+        find_start_offset_and_seq(last_file_idx, &write_offset, &seq);
+        binary_search_unsent(0, last_file_idx, &read_file_idx, &read_offset);
 
-    /* 二分查找未发送数据包 */
-    binary_search_unsent(ring_start_file, ring_start_offset);
+        cache_state.last_write_seq = seq;
+        cache_state.write_file_idx = write_file_idx;
+        cache_state.write_offset = write_offset;
+        cache_state.read_file_idx = read_file_idx;
+        cache_state.read_offset = read_offset;
+        g_sequence_id = seq + 1;
+    }
+    else{/*已写满200个文件，发生回绕*/
+        find_ring_start(&ring_start_file);
+        find_start_offset_and_seq(ring_start_file, &ring_start_offset, &seq);
+        /*回环的起点就是写指针的位置*/
+        cache_state.write_file_idx = ring_start_file;
+        cache_state.write_offset = ring_start_offset;
+        cache_state.last_write_seq = seq;
+        g_sequence_id = seq + 1;
 
-    cache_state.read_file_idx = 0;
-    cache_state.read_offset = 0;
-    cache_state.last_write_seq = 0;
+        binary_search_unsent(ring_start_file,ring_start_file - 1, &read_file_idx, &read_offset);
+        cache_state.read_file_idx = read_file_idx;
+        cache_state.read_offset = read_offset;
+
+    }
 
     LOG_I("Cache recovered: write[%d:%d] read[%d:%d]",
           cache_state.write_file_idx, cache_state.write_offset,
@@ -359,7 +529,7 @@ int data_cache_read(uint8_t *buffer, uint32_t buffer_size)
         lseek(fd, cache_state.read_offset, SEEK_SET);
 
         rt_uint32_t need = buffer_size - total_read;
-        rt_uint32_t chunk = (need < ADC_PACKET_MAX_SIZE) ? need : ADC_PACKET_MAX_SIZE;
+        rt_uint32_t chunk = (need < ADC_PACKET_SIZE) ? need : ADC_PACKET_SIZE;
 
         int n = read(fd, buffer + total_read, chunk);
         close(fd);
@@ -390,7 +560,7 @@ int data_cache_commit_read(uint32_t len)
 
     char path[32];
     build_cache_path(path, sizeof(path), cache_state.read_file_idx);
-    update_packet_status(path, cache_state.read_offset - len, PACKET_FLAG_STATUS_SENT);
+    update_packet_status_at(path, cache_state.read_offset - len, PACKET_FLAG_STATUS_SENT);
 
     ts_spi_bus_release();
     rt_mutex_release(&cache_lock);

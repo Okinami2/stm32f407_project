@@ -25,7 +25,7 @@
 #define TX_THREAD_STACK  4096
 
 
-static uint8_t dma_tx_buffer[ADC_PACKET_MAX_SIZE];
+static uint8_t dma_tx_buffer[ADC_PACKET_SIZE];
 
 /**
  * @brief 主发送线程入口函数

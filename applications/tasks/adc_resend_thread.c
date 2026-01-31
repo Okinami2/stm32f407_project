@@ -27,7 +27,7 @@
  */
 static void adc_resend_thread_entry(void *parameter)
 {
-    uint8_t *read_buf = rt_malloc(ADC_PACKET_MAX_SIZE);
+    uint8_t *read_buf = rt_malloc(ADC_PACKET_SIZE);
     if (!read_buf)
     {
         rt_kprintf("[Resend] Memory allocation failed!\n");
@@ -50,7 +50,7 @@ static void adc_resend_thread_entry(void *parameter)
 
         for (int i = 0; i < ADC_RESENT_PACKET_NUM; ++i) { /* 一次多发点，防止缓存数据发送太慢 */
 
-            int read_bytes = data_cache_read(read_buf, ADC_PACKET_MAX_SIZE);
+            int read_bytes = data_cache_read(read_buf, ADC_PACKET_SIZE);
 
             if (read_bytes > 0)
             {
