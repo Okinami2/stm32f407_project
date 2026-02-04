@@ -16,7 +16,7 @@ except Exception as e:
 TARGET = 'rt-thread.elf'
 
 DefaultEnvironment(tools=[])
-env = Environment(tools = ['mingw'],
+env = Environment(tools = ['gcc', 'g++', 'gnulink', 'ar', 'as'],
     AS = rtconfig.AS, ASFLAGS = rtconfig.AFLAGS,
     CC = rtconfig.CC, CCFLAGS = rtconfig.CFLAGS,
     AR = rtconfig.AR, ARFLAGS = '-rc',

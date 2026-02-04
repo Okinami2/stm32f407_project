@@ -27,6 +27,12 @@
 import os
 import sys
 import string
+
+# Ensure local tools directory is in path for menuconfig import
+tools_dir = os.path.dirname(os.path.abspath(__file__))
+if tools_dir not in sys.path:
+    sys.path.insert(0, tools_dir)
+
 import utils
 import operator
 import rtconfig
