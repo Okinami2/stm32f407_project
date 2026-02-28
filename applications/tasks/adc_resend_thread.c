@@ -53,19 +53,23 @@ static void adc_resend_thread_entry(void *parameter)
 
             int read_bytes = data_cache_read(read_buf, ADC_PACKET_SIZE);
 
-            if (read_bytes > 0)
+            if (read_bytes == ADC_PACKET_SIZE)
             {
                 rt_int32_t send_bytes = tcp_send_packet(read_buf, read_bytes);
-                if (send_bytes == read_bytes)
+                if (send_bytes == ADC_PACKET_SIZE)
                 {
                     data_cache_commit_read(read_bytes);
                 }
                 else
                 {
-                    rt_kprintf("tcp resent bytes %d isn't equal to read bytes %d.\n",send_bytes,read_bytes);
+                    rt_kprintf("tcp resent failed.\n");
                     tcp_close_socket();
                     rt_thread_mdelay(2000);
+                    break;
                 }
+            }
+            else{
+                break;
             }
         }
     }

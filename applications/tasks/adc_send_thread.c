@@ -70,7 +70,10 @@ static void send_to_server_thread_entry(void *parameter)
 
             if (!send_success)
             {
-                data_cache_write(dma_tx_buffer, packet_len);
+                if(data_cache_write(dma_tx_buffer, packet_len) != 0){
+                    rt_kprintf("data write to cache fail!");
+                    continue;
+                }
             }
         }
 

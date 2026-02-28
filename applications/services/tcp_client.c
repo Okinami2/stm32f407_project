@@ -92,8 +92,8 @@ int tcp_connect_to_server(void)
         return -1;  /* 网络未连接，直接返回 */
     }
 
-    sock_fd = socket(AF_INET, SOCK_STREAM, 0);  /* 创建 socket */
-    if (sock_fd < 0)
+    int new_sock_fd = socket(AF_INET, SOCK_STREAM, 0);  /* 创建 socket */
+    if (new_sock_fd < 0)
     {
         rt_kprintf("[Network] Socket create failed!\n");
         return -1;
@@ -101,8 +101,8 @@ int tcp_connect_to_server(void)
 
     timeout.tv_sec = 5;
     timeout.tv_usec = 0;
-    setsockopt(sock_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-    setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    setsockopt(new_sock_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    setsockopt(new_sock_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(SERVER_PORT);
@@ -110,12 +110,17 @@ int tcp_connect_to_server(void)
     memset(&(server_addr.sin_zero), 0, sizeof(server_addr.sin_zero));
 
     /* 连接服务器 */
-    if (connect(sock_fd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr)) < 0)
+    if (connect(new_sock_fd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr)) < 0)
     {
         rt_kprintf("[Network] Connect failed!\n");
         tcp_close_socket();  /* 连接失败后，清理 socket */
         return -1;
     }
+
+
+    rt_mutex_take(&net_lock, RT_WAITING_FOREVER);
+    sock_fd = new_sock_fd;
+    rt_mutex_release(&net_lock);
 
     rt_kprintf("[Network] Connected to %s:%d\n", SERVER_IP, SERVER_PORT);
     return 0;
@@ -157,5 +162,8 @@ int tcp_send_packet(const uint8_t *data, uint32_t len)
 
 bool tcp_is_connected(void)
 {
-    return (sock_fd >= 0);
+    rt_mutex_take(&net_lock, RT_WAITING_FOREVER);
+    bool connected = (sock_fd >= 0);
+    rt_mutex_release(&net_lock);
+    return connected;
 }

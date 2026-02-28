@@ -77,9 +77,14 @@ static int update_packet_status_at(const char *path, rt_uint32_t offset, rt_uint
 
     lseek(fd, offset + PACKET_OFFSET_STATUS, SEEK_SET);
     int ret = write(fd, &status, 1);
-    close(fd);
+    if(ret == 1){
+        fsync(fd);
+        close(fd);
+        return 0;
+    }
 
-    return (ret == 1) ? 0 : -1;
+    close(fd);
+    return -1;
 }
 
 static int binary_search_unsent_offset(rt_uint32_t idx, rt_uint32_t *offset)
@@ -96,11 +101,17 @@ static int binary_search_unsent_offset(rt_uint32_t idx, rt_uint32_t *offset)
         return -1;
     }
 
+    RT_ASSERT((size % ADC_PACKET_SIZE) == 0);
+
     rt_uint32_t right = size / ADC_PACKET_SIZE;
 
     rt_uint8_t left_state, mid_state;
     rt_uint32_t seq;
-    read_packet_header_at(fd, left * ADC_PACKET_SIZE, &left_state, &seq);
+
+    if (read_packet_header_at(fd, 0, &left_state, &seq) < 0) {
+        close(fd);
+        return -1;
+    }
     if(left_state == PACKET_FLAG_STATUS_WATTING){
         close(fd);
         *offset = 0;
@@ -142,7 +153,7 @@ static int binary_search_unsent(rt_uint32_t start_file_idx, rt_uint32_t end_file
     rt_uint32_t left = 0, right = 0;
 
     if(start_file_idx == end_file_idx){
-
+        *read_file_idx = start_file_idx;
         if(binary_search_unsent_offset(start_file_idx,read_offset) < 0){
             return -1;
         }
@@ -217,8 +228,8 @@ static int binary_search_unsent(rt_uint32_t start_file_idx, rt_uint32_t end_file
         return -1;
     }
 
-    if(*read_offset >= (CACHE_SEG_NUM - 1) * ADC_PACKET_SIZE){
-        *read_file_idx += 1;
+    if(*read_offset >= CACHE_SEG_SIZE){
+        *read_file_idx = (*read_file_idx + 1) % CACHE_FILE_COUNT;
         *read_offset = 0;
     }
 
@@ -408,8 +419,17 @@ static int recover_cache_state(void)
         cache_state.read_offset = read_offset;
 
     }
-
-    LOG_I("Cache recovered: write[%d:%d] read[%d:%d]",
+    if (cache_state.write_offset >= CACHE_SEG_SIZE) {
+        cache_state.write_offset = 0;
+        cache_state.write_file_idx =
+                (cache_state.write_file_idx + 1) % CACHE_FILE_COUNT;
+    }
+    if (cache_state.read_offset >= CACHE_SEG_SIZE) {
+        cache_state.read_offset = 0;
+        cache_state.read_file_idx =
+                (cache_state.read_file_idx + 1) % CACHE_FILE_COUNT;
+    }
+    LOG_I("Cache recovered: \n write[%d:%d] \n read[%d:%d] \n",
           cache_state.write_file_idx, cache_state.write_offset,
           cache_state.read_file_idx, cache_state.read_offset);
 
@@ -436,6 +456,7 @@ static int cache_write_blob_locked(const rt_uint8_t *data, rt_uint32_t len)
             return 1;
         }
         int n = write(fd, data + written, chunk);
+        fsync(fd);
         close(fd);
 
         if (n <= 0) return -1;
@@ -448,19 +469,23 @@ static int cache_write_blob_locked(const rt_uint8_t *data, rt_uint32_t len)
             cache_state.write_offset = 0;
         }
     }
-
     return 0;
 }
 
-static void flush_ram_cache_to_sd(void)
+static int flush_ram_cache_to_sd(void)
 {
-    if (ram_buf_offset == 0) return;
+    if (ram_buf_offset == 0) return 0;
 
     if (cache_write_blob_locked(sd_cache_ram_buf, ram_buf_offset) == 0)
     {
         ram_buf_offset = 0;
         last_flush_tick = rt_tick_get();
     }
+    else{
+        return -1;
+
+    }
+    return 0;
 }
 
 /* 公共接口实现 */
@@ -506,7 +531,12 @@ int data_cache_write(const uint8_t *data, uint32_t len)
     {
         rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
         ts_spi_bus_claim();
-        flush_ram_cache_to_sd();
+        if(flush_ram_cache_to_sd() != 0){
+            LOG_W("flush ram to sd fail!");
+            ts_spi_bus_release();
+            rt_mutex_release(&cache_lock);
+            return -1;
+        }
         ts_spi_bus_release();
         rt_mutex_release(&cache_lock);
     }
@@ -518,13 +548,18 @@ int data_cache_write(const uint8_t *data, uint32_t len)
         ram_buf_offset += len;
     }
     else{
-        LOG_W("RAM is full, some data is missing.");
+        return -1;
     }
 
     if (rt_tick_get() - last_flush_tick >= CACHE_FLUSH_INTERVAL_TICKS)
     {
         ts_spi_bus_claim();
-        flush_ram_cache_to_sd();
+        if(flush_ram_cache_to_sd() != 0){
+            LOG_W("flush ram to sd fail!");
+            ts_spi_bus_release();
+            rt_mutex_release(&cache_lock);
+            return -1;
+        }
         ts_spi_bus_release();
     }
 
@@ -577,12 +612,15 @@ int data_cache_read(uint8_t *buffer, uint32_t buffer_size)
     ts_spi_bus_release();
     rt_mutex_release(&cache_lock);
 
-    return (total_read > 0) ? (int)total_read : -1;
+    if(total_read == 0) return 0;
+
+    return (int)total_read;
 }
 
 int data_cache_commit_read(uint32_t len)
 {
     if (len == 0) return 0;
+    if (len % ADC_PACKET_SIZE != 0) return -1;
 
     rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
     ts_spi_bus_claim();

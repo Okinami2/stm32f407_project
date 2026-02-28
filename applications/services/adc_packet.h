@@ -42,8 +42,8 @@ extern rt_uint32_t g_sequence_id;
 #define PACKET_FLAG_HEADER_1        0xAA
 #define PACKET_FLAG_HEADER_2        0x55
 #define PACKET_FLAG_STATUS_EMPTY    0xFF
-#define PACKET_FLAG_STATUS_WATTING  0xAA
-#define PACKET_FLAG_STATUS_SENT     0xBB
+#define PACKET_FLAG_STATUS_WATTING  0x01
+#define PACKET_FLAG_STATUS_SENT     0x02
 #define PACKET_FLAG_TAIL_1          0x0D
 #define PACKET_FLAG_TAIL_2          0x0A
 
