@@ -16,6 +16,7 @@
 #include "tasks/adc_get_thread.h"
 #include "tasks/adc_send_thread.h"
 #include "hardware/max40109_hal.h"
+#include "services/data_cache.h"
 
 #define DBG_TAG "main"
 #define DBG_LVL DBG_LOG
@@ -29,13 +30,11 @@ int main(void)
     if(adc_get_thread_start() != RT_EOK){
         rt_kprintf("fail start adc_get_thread\n");
     }
-
+    /*
+    */
     if(adc_send_to_server_start() != RT_EOK){
         rt_kprintf("fail start adc_send_thread\n");
     }
-
-
-
 
     /* Test code for time display*/
     // struct timeval sys_time;
@@ -81,22 +80,16 @@ int main(void)
         rt_kprintf("current_pps_stats: %d, current_tick_per_sec = %d.%d \n",current_state,sec_int,sec_f);
         */
 
-        /* Test code for SD card access
-        ts_spi_bus_claim();
 
-        ls("/");
         dump_cache_files();
-
-        ts_spi_bus_release();
-        */
 
         /* Test code for ADC value
         double uncal_val = 0.0;
         double cal_val = 0.0;
         double ads_val = 0.0;
 
-        max40109_read_pressure(0, &uncal_val, 0);
-        max40109_read_pressure(0, &cal_val, 1);
+        max40109_read_pressure(6, &uncal_val, 0);
+        max40109_read_pressure(6, &cal_val, 1);
         extern double get_tmp_ch0_press(void);
         ads_val = get_tmp_ch0_press();
 
@@ -111,11 +104,11 @@ int main(void)
         else b2 = (int)((a2 - cal_val) * 1000);
         if(a3>0) b3 = (int)((ads_val - a3) * 1000);
         else b3 = (int)((a3 - ads_val) * 1000);
-
         rt_kprintf("ch6: %d.%03d, %d.%03d, %d.%03d\n", a1, b1, a2, b2, a3, b3);
-        */
 
-        rt_thread_mdelay(1000);
+        */
+        rt_thread_mdelay(5000);
+
 
     }
     return RT_EOK;

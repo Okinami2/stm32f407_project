@@ -18,6 +18,14 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <netdev.h>
+#include <errno.h>
+
+#ifndef EAGAIN
+#define EAGAIN 11
+#endif
+#ifndef EWOULDBLOCK
+#define EWOULDBLOCK EAGAIN
+#endif
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -91,9 +99,10 @@ int tcp_connect_to_server(void)
         return -1;
     }
 
-    timeout.tv_sec = 2;
+    timeout.tv_sec = 5;
     timeout.tv_usec = 0;
-    setsockopt(sock_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));  /* 设置发送超时 */
+    setsockopt(sock_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(SERVER_PORT);
@@ -124,9 +133,18 @@ int tcp_send_packet(const uint8_t *data, uint32_t len)
     while (total_sent < len)
     {
         sent_bytes = send(sock_fd, data + total_sent, len - total_sent, 0);
-        if (sent_bytes <= 0)
+        if (sent_bytes < 0)
         {
-            rt_kprintf("[Network] Send failed, error: %d\n", sent_bytes);
+            int err = errno;
+            if (err == EAGAIN || err == EWOULDBLOCK) {
+                rt_thread_mdelay(10);
+                continue;
+            }
+            rt_mutex_release(&net_lock);
+            return -1;
+        }
+        if (sent_bytes == 0) {
+            rt_kprintf("[Network] Connection closed by peer\n");
             rt_mutex_release(&net_lock);
             return -1;
         }

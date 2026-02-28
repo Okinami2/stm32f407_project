@@ -412,7 +412,7 @@ int max_app_init(void)
         /* Set analog output stage: absolute voltage, internal resistor */
         res = max40109_write_u8(i, MAX40109_REG_ANALOG_OUTPUT_STAGE, 0x8);
 
-        /* Set pga = 144 */
+        /* Set pga = 90 */
         res = max40109_write_u8(i, MAX40109_REG_PGA_PRESSURE_GAIN, 0x07);
 
         /* Clear any pending status bits at startup */
@@ -423,7 +423,7 @@ int max_app_init(void)
         }
 
         /* Power on */
-        res = max40109_write_u16(i, MAX40109_REG_CONFIG, 0x2001);
+        res = max40109_write_u16(i, MAX40109_REG_CONFIG, 0x2000);
 
         if(res != RT_EOK){
             LOG_W("CH[%d] max40109 config init failed",i);
@@ -440,7 +440,7 @@ int max_app_init(void)
 
     }
 
-    LOG_I("MAX40109 Init Completed", NUM_MAX_CHIPS);
+    LOG_I("MAX40109 Init Completed");
     return RT_EOK;
 }
 INIT_DEVICE_EXPORT(max_app_init);

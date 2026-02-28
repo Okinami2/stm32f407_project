@@ -172,7 +172,7 @@ static void adc_get_thread_entry(void *parameter)
                             // rt_kprintf("unexpected adc data type\n");
                             break;
                         }
-                        tmp_ch0_press = p_dest_channels[0][batch_index];
+                        tmp_ch0_press = p_dest_channels[6][batch_index];
                         /* 在这里测试采集数据情况 [6]代表通道6
                         int a = (int)p_dest_channels[0][batch_index];
                         int b = (int)(p_dest_channels[0][batch_index] - a) * 1000000;

@@ -45,6 +45,7 @@ static void adc_resend_thread_entry(void *parameter)
 
         if (!data_cache_has_pending())
         {
+            //rt_kprintf("[Resend] has no data to resend\n");
             continue;
         }
 
@@ -54,13 +55,14 @@ static void adc_resend_thread_entry(void *parameter)
 
             if (read_bytes > 0)
             {
-                if (tcp_send_packet(read_buf, read_bytes) == read_bytes)
+                rt_int32_t send_bytes = tcp_send_packet(read_buf, read_bytes);
+                if (send_bytes == read_bytes)
                 {
                     data_cache_commit_read(read_bytes);
                 }
                 else
                 {
-                    rt_kprintf("tcp resent bytes isn't equal to expected num.\n");
+                    rt_kprintf("tcp resent bytes %d isn't equal to read bytes %d.\n",send_bytes,read_bytes);
                     tcp_close_socket();
                     rt_thread_mdelay(2000);
                 }

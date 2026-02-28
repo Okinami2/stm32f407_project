@@ -22,7 +22,7 @@
 
 /* 线程配置 */
 #define TX_THREAD_PRIO   20
-#define TX_THREAD_STACK  4096
+#define TX_THREAD_STACK  2048
 
 
 static uint8_t dma_tx_buffer[ADC_PACKET_SIZE];
@@ -70,8 +70,6 @@ static void send_to_server_thread_entry(void *parameter)
 
             if (!send_success)
             {
-                rt_kprintf("[Send] Send failed, closing socket.\n");
-                tcp_close_socket();
                 data_cache_write(dma_tx_buffer, packet_len);
             }
         }

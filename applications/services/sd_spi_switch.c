@@ -100,6 +100,10 @@ void ts_spi_bus_claim(void) {
 void ts_spi_bus_release(void) {
     _ensure_mux_mutex_inited();
 
+    if (g_sd_spi_mux_mutex.owner != rt_thread_self()) {
+        return;
+    }
+
     rt_base_t level = rt_hw_interrupt_disable();
 
     _set_mux_mode(MODE_SAFE_HIZ);
@@ -108,8 +112,5 @@ void ts_spi_bus_release(void) {
 
     gnss_uart_resume();
 
-    if (rt_mutex_release(&g_sd_spi_mux_mutex) != RT_EOK)
-    {
-        rt_kprintf("[sd_spi_switch] mutex release failed\n");
-    }
+    rt_mutex_release(&g_sd_spi_mux_mutex);
 }

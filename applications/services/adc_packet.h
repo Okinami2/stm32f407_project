@@ -39,8 +39,8 @@ extern bool receive_buff_flag;
 extern rt_uint32_t g_sequence_id;
 
 /* 包头标志 */
-#define PACKET_FLAG_HEADER_1        0x55
-#define PACKET_FLAG_HEADER_2        0xAA
+#define PACKET_FLAG_HEADER_1        0xAA
+#define PACKET_FLAG_HEADER_2        0x55
 #define PACKET_FLAG_STATUS_EMPTY    0xFF
 #define PACKET_FLAG_STATUS_WATTING  0xAA
 #define PACKET_FLAG_STATUS_SENT     0xBB
@@ -55,7 +55,7 @@ extern rt_uint32_t g_sequence_id;
 
 /* 最大数据包大小 (用于缓冲区分配) */
 #define ADC_PACKET_SIZE     (BATCH_SIZE * 8 * sizeof(float) + sizeof(sys_calendar_time_t) + sizeof(rt_uint8_t) + 9)
-#define ADC_RESENT_PACKET_NUM   5
+#define ADC_RESENT_PACKET_NUM   64
 /**
  * @brief 计算 ADC 数据包的总长度
  * @return 数据包字节数

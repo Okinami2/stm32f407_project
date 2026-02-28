@@ -19,23 +19,21 @@
 
 #include "data_cache.h"
 #include "adc_packet.h"
-#include "../services/sd_spi_switch.h"
+#include "sd_spi_switch.h"
 
 #define DBG_TAG "data_cache"
 #define DBG_LVL DBG_LOG
 #include <rtdbg.h>
 
 /* 缓存文件配置 */
-#define CACHE_FILE_PREFIX     "/cache_"
-#define CACHE_FILE_SUFFIX     ".dat"
 
 #define CACHE_FILE_COUNT        200
 #define CACHE_SEG_NUM           8000
 #define CACHE_SEG_SIZE        (ADC_PACKET_SIZE * CACHE_SEG_NUM)
 
 /* RAM 缓存配置 */
-#define RAM_CACHE_SIZE               (32U * 1024U)
-#define CACHE_FLUSH_INTERVAL_TICKS   (rt_tick_from_millisecond(5000))
+#define RAM_CACHE_SIZE               (24U * 1024U)
+#define CACHE_FLUSH_INTERVAL_TICKS   (rt_tick_from_millisecond(2000))
 
 /* 内存维护的读写状态 */
 typedef struct {
@@ -56,7 +54,7 @@ static cache_state_t cache_state;
 /* 辅助函数 */
 static void build_cache_path(char *path, size_t size, rt_uint32_t idx)
 {
-    rt_snprintf(path, size, "%s%03d%s", CACHE_FILE_PREFIX, (int)idx, CACHE_FILE_SUFFIX);
+    rt_snprintf(path, size, "/cache/cache_%03d.dat", (int)idx);
 }
 
 static int read_packet_header_at(int fd, rt_uint32_t offset, rt_uint8_t *status, rt_uint32_t *seq)
@@ -143,6 +141,20 @@ static int binary_search_unsent(rt_uint32_t start_file_idx, rt_uint32_t end_file
 {
     rt_uint32_t left = 0, right = 0;
 
+    if(start_file_idx == end_file_idx){
+
+        if(binary_search_unsent_offset(start_file_idx,read_offset) < 0){
+            return -1;
+        }
+
+        if(*read_offset >= (CACHE_SEG_NUM - 1) * ADC_PACKET_SIZE){
+            *read_file_idx += 1;
+            *read_offset = 0;
+        }
+
+        return 0;
+    }
+
     if(start_file_idx < end_file_idx) /*未发生回绕*/
     {
         left = start_file_idx;
@@ -201,7 +213,6 @@ static int binary_search_unsent(rt_uint32_t start_file_idx, rt_uint32_t end_file
     else{
         *read_file_idx = (left-1) % CACHE_FILE_COUNT;
     }
-
     if(binary_search_unsent_offset(*read_file_idx,read_offset) < 0){
         return -1;
     }
@@ -348,7 +359,7 @@ static int find_start_offset_and_seq(rt_uint32_t idx, rt_uint32_t *start_offset,
         return -1;
     }
 
-    *start_offset = (left == n_packets) ? 0 : left * ADC_PACKET_SIZE;
+    *start_offset = left * ADC_PACKET_SIZE;
     close(fd);
     return 0;
 }
@@ -356,10 +367,19 @@ static int find_start_offset_and_seq(rt_uint32_t idx, rt_uint32_t *start_offset,
 /* 初始化时恢复读写状态 */
 static int recover_cache_state(void)
 {
+    rt_uint32_t tmp;
+    if (get_file_seq_at(0, 0, &tmp) < 0) {
+        memset(&cache_state, 0, sizeof(cache_state));
+        g_sequence_id = 0;
+        LOG_I("Cache empty, init state to zero.");
+        return 0;
+    }
+
     rt_uint32_t ring_start_file = 0, ring_start_offset = 0;
     rt_uint32_t write_file_idx, write_offset;
     rt_uint32_t read_file_idx, read_offset;
     rt_uint32_t seq = 0;
+
     rt_uint32_t last_file_idx = find_last_existing_file();
 
     if(last_file_idx < CACHE_FILE_COUNT - 1){
@@ -452,7 +472,12 @@ int data_cache_init(void)
 
     rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
     ts_spi_bus_claim();
-    recover_cache_state();
+
+    int ret = recover_cache_state();
+    if (ret < 0) {
+        LOG_E("recover_cache_state failed");
+    }
+
     ts_spi_bus_release();
     rt_mutex_release(&cache_lock);
 
@@ -611,53 +636,64 @@ uint32_t data_cache_get_ram_usage(void)
 
 void dump_cache_files(void)
 {
+    rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
     rt_kprintf("Cache State:\n");
     rt_kprintf("  Write: file[%d] offset[%d]\n", cache_state.write_file_idx, cache_state.write_offset);
     rt_kprintf("  Read:  file[%d] offset[%d]\n", cache_state.read_file_idx, cache_state.read_offset);
+    rt_mutex_release(&cache_lock);
 }
 
 int sdnand_init_mount(void)
 {
-    rt_pin_write(BSP_RFMODPWR_EN_PIN,PIN_HIGH);
-    rt_pin_write(BSP_TFPWR_EN_PIN,PIN_HIGH);
+    rt_pin_write(BSP_RFMODPWR_EN_PIN, PIN_HIGH);
+    rt_pin_write(BSP_TFPWR_EN_PIN, PIN_HIGH);
+
+    rt_thread_mdelay(100);
 
     ts_spi_bus_claim();
 
-    rt_thread_mdelay(100);
-    rt_pin_mode(BSP_SD_CS_PIN,PIN_MODE_OUTPUT);
+    rt_pin_mode(BSP_SD_CS_PIN, PIN_MODE_OUTPUT);
+
     rt_err_t res = rt_hw_spi_device_attach("spi3", "spi30", SD_CS_GPIO_Port, SD_CS_Pin);
-    if(res == RT_EOK ){
-        res = msd_init("sdnand0","spi30");
+    if (res != RT_EOK) {
+        LOG_E("SPI device attach failed: %d", res);
+        ts_spi_bus_release();
+        return -1;
     }
 
-    int ret = dfs_mount("sdnand0", "/", "lfs", 0, 0);
+    res = msd_init("sdnand0", "spi30");
+    if (res != RT_EOK) {
+        LOG_E("msd_init failed: %d", res);
+        ts_spi_bus_release();
+        return -1;
+    }
 
-    if (ret == 0)
-        {
-            LOG_I("littleFS mounted to /");
-        }
-        else
-        {
-            LOG_E("Mount failed! Error code: %d", ret);
-            LOG_W("Attempting to format 'sdnand0' with littleFS...");
+    LOG_I("SD card device initialized");
 
-            if (dfs_mkfs("lfs", "sdnand0") == 0)
-            {
-                LOG_I("Format success, retrying mount...");
-                rt_thread_mdelay(100);
-                if (dfs_mount("sdnand0", "/", "lfs", 0, 0) == 0) {
-                    LOG_I("Retry mount success!");
-                } else {
-                    LOG_E("Retry mount failed after format.");
-                }
-            }
-            else
-            {
-                LOG_E("Format failed! Please check if the device supports MTD or block access.");
-            }
+    if (dfs_mount("sdnand0", "/", "elm", 0, 0) != 0) {
+        LOG_W("dfs_mount failed, trying to format...");
+
+        int ret = dfs_mkfs("elm", "sdnand0");
+        if (ret != 0) {
+            LOG_E("dfs_mkfs failed: %d", ret);
+            ts_spi_bus_release();
+            return -1;
         }
+
+        rt_thread_mdelay(100);
+
+        if (dfs_mount("sdnand0", "/", "elm", 0, 0) != 0) {
+            LOG_E("dfs_mount failed after format");
+            ts_spi_bus_release();
+            return -1;
+        }
+    }
+
+    LOG_I("SD card mounted successfully");
+    mkdir("/cache", 0777);
 
     ts_spi_bus_release();
     return RT_EOK;
 }
-INIT_DEVICE_EXPORT(sdnand_init_mount);
+INIT_APP_EXPORT(sdnand_init_mount);
+
