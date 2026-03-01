@@ -38,10 +38,6 @@ static void send_to_server_thread_entry(void *parameter)
 
     while (1)
     {
-        if (!tcp_is_connected())
-        {
-            tcp_connect_to_server();
-        }
 
         if (rt_sem_take(adc_get_done_sem, rt_tick_from_millisecond(1000)) == RT_EOK)
         {
@@ -52,11 +48,6 @@ static void send_to_server_thread_entry(void *parameter)
             {
                 rt_kprintf("[Send] Packet pack failed!\n");
                 continue;
-            }
-
-            if (!tcp_is_connected())
-            {
-                tcp_connect_to_server();
             }
 
             if (tcp_is_connected())

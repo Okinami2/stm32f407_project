@@ -124,6 +124,8 @@
 #define RT_USING_I2C_BITOPS
 #define RT_USING_PHY
 #define RT_USING_MTD_NOR
+#define RT_USING_RTC
+#define RT_USING_SOFT_RTC
 #define RT_USING_SPI
 #define RT_USING_SPI_MSD
 #define RT_USING_PIN
@@ -185,31 +187,28 @@
 #define RT_LWIP_IGMP
 #define RT_LWIP_ICMP
 #define RT_LWIP_DNS
-#define RT_LWIP_DHCP
-#define IP_SOF_BROADCAST 1
-#define IP_SOF_BROADCAST_RECV 1
 
 /* Static IPv4 Address */
 
-#define RT_LWIP_IPADDR "192.168.1.30"
-#define RT_LWIP_GWADDR "192.168.1.1"
+#define RT_LWIP_IPADDR "192.168.137.30"
+#define RT_LWIP_GWADDR "192.168.137.1"
 #define RT_LWIP_MSKADDR "255.255.255.0"
 /* end of Static IPv4 Address */
 #define RT_LWIP_UDP
 #define RT_LWIP_TCP
 #define RT_LWIP_RAW
-#define RT_MEMP_NUM_NETCONN 8
+#define RT_MEMP_NUM_NETCONN 4
 #define RT_LWIP_PBUF_NUM 8
-#define RT_LWIP_RAW_PCB_NUM 8
-#define RT_LWIP_UDP_PCB_NUM 8
-#define RT_LWIP_TCP_PCB_NUM 8
+#define RT_LWIP_RAW_PCB_NUM 2
+#define RT_LWIP_UDP_PCB_NUM 2
+#define RT_LWIP_TCP_PCB_NUM 4
 #define RT_LWIP_TCP_SEG_NUM 16
 #define RT_LWIP_TCP_SND_BUF 4096
 #define RT_LWIP_TCP_WND 4096
-#define RT_LWIP_TCPTHREAD_PRIORITY 10
+#define RT_LWIP_TCPTHREAD_PRIORITY 21
 #define RT_LWIP_TCPTHREAD_MBOX_SIZE 8
 #define RT_LWIP_TCPTHREAD_STACKSIZE 2048
-#define RT_LWIP_ETHTHREAD_PRIORITY 12
+#define RT_LWIP_ETHTHREAD_PRIORITY 23
 #define RT_LWIP_ETHTHREAD_STACKSIZE 2048
 #define RT_LWIP_ETHTHREAD_MBOX_SIZE 8
 #define RT_LWIP_REASSEMBLY_FRAG
@@ -322,15 +321,6 @@
 /* Micrium: Micrium software products porting for RT-Thread */
 
 /* end of Micrium: Micrium software products porting for RT-Thread */
-#define PKG_USING_LITTLEFS
-#define PKG_USING_LITTLEFS_LATEST_VERSION
-#define LFS_READ_SIZE 256
-#define LFS_PROG_SIZE 256
-#define LFS_BLOCK_SIZE 4096
-#define LFS_CACHE_SIZE 256
-#define LFS_BLOCK_CYCLES -1
-#define LFS_THREADSAFE
-#define LFS_LOOKAHEAD_MAX 128
 /* end of system packages */
 
 /* peripheral libraries and drivers */

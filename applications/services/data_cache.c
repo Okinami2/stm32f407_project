@@ -73,11 +73,14 @@ static int read_packet_header_at(int fd, rt_uint32_t offset, rt_uint8_t *status,
 static int update_packet_status_at(const char *path, rt_uint32_t offset, rt_uint8_t status)
 {
     int fd = open(path, O_RDWR, 0);
-    if (fd < 0) return -1;
-
+    if (fd < 0) {
+        rt_kprintf("[cache] open failed: %s\n", path);
+        rt_kprintf("open failed, path=%s, errno=%d\n", path, errno);
+        return -1;
+    }
     lseek(fd, offset + PACKET_OFFSET_STATUS, SEEK_SET);
     int ret = write(fd, &status, 1);
-    if(ret == 1){
+    if (ret == 1) {
         fsync(fd);
         close(fd);
         return 0;
@@ -86,6 +89,8 @@ static int update_packet_status_at(const char *path, rt_uint32_t offset, rt_uint
     close(fd);
     return -1;
 }
+
+
 
 static int binary_search_unsent_offset(rt_uint32_t idx, rt_uint32_t *offset)
 {
@@ -449,7 +454,7 @@ static int cache_write_blob_locked(const rt_uint8_t *data, rt_uint32_t len)
         rt_uint32_t space = CACHE_SEG_SIZE - cache_state.write_offset;
         rt_uint32_t chunk = (remain < space) ? remain : space;
 
-        int fd = open(path, O_WRONLY | O_CREAT, 0);
+        int fd = open(path, O_WRONLY | O_CREAT, 0644);
         if (fd < 0) return -1;
         if(lseek(fd, cache_state.write_offset,SEEK_SET) < 0){
             close(fd);
@@ -512,60 +517,43 @@ int data_cache_init(void)
 int data_cache_write(const uint8_t *data, uint32_t len)
 {
     if (!data || len == 0) return -1;
+    if (last_flush_tick == 0) last_flush_tick = rt_tick_get();
 
-    if (last_flush_tick == 0)
-    {
-        last_flush_tick = rt_tick_get();
+    rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
+    ts_spi_bus_claim();
+
+    // 需要刷新到SD
+    bool need_flush = (ram_buf_offset + len > RAM_CACHE_SIZE) ||
+                      (rt_tick_get() - last_flush_tick >= CACHE_FLUSH_INTERVAL_TICKS);
+
+    if (need_flush && ram_buf_offset > 0) {
+        if (flush_ram_cache_to_sd() != 0) {
+            LOG_W("flush ram to sd fail!");
+            ts_spi_bus_release();
+            rt_mutex_release(&cache_lock);
+            return -1;
+        }
     }
 
-    if (len > RAM_CACHE_SIZE)
-    {
-        rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
-        ts_spi_bus_claim();
+    // 大数据直接写SD
+    if (len > RAM_CACHE_SIZE) {
         int ret = cache_write_blob_locked(data, len);
         ts_spi_bus_release();
         rt_mutex_release(&cache_lock);
         return ret;
     }
-    else if (ram_buf_offset + len > RAM_CACHE_SIZE)
-    {
-        rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
-        ts_spi_bus_claim();
-        if(flush_ram_cache_to_sd() != 0){
-            LOG_W("flush ram to sd fail!");
-            ts_spi_bus_release();
-            rt_mutex_release(&cache_lock);
-            return -1;
-        }
-        ts_spi_bus_release();
-        rt_mutex_release(&cache_lock);
-    }
 
-    rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
-    if (ram_buf_offset + len <= RAM_CACHE_SIZE)
-    {
+    // 写入RAM缓存
+    if (ram_buf_offset + len <= RAM_CACHE_SIZE) {
         memcpy(sd_cache_ram_buf + ram_buf_offset, data, len);
         ram_buf_offset += len;
     }
-    else{
-        return -1;
-    }
 
-    if (rt_tick_get() - last_flush_tick >= CACHE_FLUSH_INTERVAL_TICKS)
-    {
-        ts_spi_bus_claim();
-        if(flush_ram_cache_to_sd() != 0){
-            LOG_W("flush ram to sd fail!");
-            ts_spi_bus_release();
-            rt_mutex_release(&cache_lock);
-            return -1;
-        }
-        ts_spi_bus_release();
-    }
-
+    ts_spi_bus_release();
     rt_mutex_release(&cache_lock);
     return 0;
 }
+
 
 int data_cache_read(uint8_t *buffer, uint32_t buffer_size)
 {
@@ -622,18 +610,20 @@ int data_cache_commit_read(uint32_t len)
     if (len == 0) return 0;
     if (len % ADC_PACKET_SIZE != 0) return -1;
 
+
     rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
     ts_spi_bus_claim();
-
     char path[32];
     build_cache_path(path, sizeof(path), cache_state.read_file_idx);
-    update_packet_status_at(path, cache_state.read_offset, PACKET_FLAG_STATUS_SENT);
+    if(update_packet_status_at(path, cache_state.read_offset, PACKET_FLAG_STATUS_SENT) == -1){
+        rt_kprintf("update status fail\n");
+        return -1;
+    }
     cache_state.read_offset += len;
     if (cache_state.read_offset >= CACHE_SEG_SIZE) {
         cache_state.read_offset = 0;
         cache_state.read_file_idx = (cache_state.read_file_idx + 1) % CACHE_FILE_COUNT;
     }
-
     ts_spi_bus_release();
     rt_mutex_release(&cache_lock);
 
@@ -675,11 +665,16 @@ uint32_t data_cache_get_ram_usage(void)
 void dump_cache_files(void)
 {
     rt_mutex_take(&cache_lock, RT_WAITING_FOREVER);
+
     rt_kprintf("Cache State:\n");
-    rt_kprintf("  Write: file[%d] offset[%d]\n", cache_state.write_file_idx, cache_state.write_offset);
-    rt_kprintf("  Read:  file[%d] offset[%d]\n", cache_state.read_file_idx, cache_state.read_offset);
+    rt_kprintf("  Write: file[%d] offset[%d]\n",
+               cache_state.write_file_idx, cache_state.write_offset);
+    rt_kprintf("  Read:  file[%d] offset[%d]\n",
+               cache_state.read_file_idx, cache_state.read_offset);
+
     rt_mutex_release(&cache_lock);
 }
+
 
 int sdnand_init_mount(void)
 {
@@ -707,6 +702,8 @@ int sdnand_init_mount(void)
     }
 
     LOG_I("SD card device initialized");
+
+    //mkfs("elm","sdnand0");
 
     if (dfs_mount("sdnand0", "/", "elm", 0, 0) != 0) {
         LOG_W("dfs_mount failed, trying to format...");

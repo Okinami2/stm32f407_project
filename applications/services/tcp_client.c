@@ -113,7 +113,7 @@ int tcp_connect_to_server(void)
     if (connect(new_sock_fd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr)) < 0)
     {
         rt_kprintf("[Network] Connect failed!\n");
-        tcp_close_socket();  /* 连接失败后，清理 socket */
+        closesocket(new_sock_fd);  /* 连接失败后，清理 socket */
         return -1;
     }
 
@@ -128,36 +128,21 @@ int tcp_connect_to_server(void)
 
 int tcp_send_packet(const uint8_t *data, uint32_t len)
 {
-    int total_sent = 0;
-    int sent_bytes;
 
     if (sock_fd < 0) return -1;
 
     rt_mutex_take(&net_lock, RT_WAITING_FOREVER);
 
-    while (total_sent < len)
+    int ret = send(sock_fd, data, len, 0);
+    if (ret < 0)
     {
-        sent_bytes = send(sock_fd, data + total_sent, len - total_sent, 0);
-        if (sent_bytes < 0)
-        {
-            int err = errno;
-            if (err == EAGAIN || err == EWOULDBLOCK) {
-                rt_thread_mdelay(10);
-                continue;
-            }
-            rt_mutex_release(&net_lock);
-            return -1;
-        }
-        if (sent_bytes == 0) {
-            rt_kprintf("[Network] Connection closed by peer\n");
-            rt_mutex_release(&net_lock);
-            return -1;
-        }
-        total_sent += sent_bytes;
+        rt_kprintf("[Resend] send failed, errno=%d, count=%d\n", errno, 1);
+        rt_mutex_release(&net_lock);
+        return -1;
     }
 
     rt_mutex_release(&net_lock);
-    return total_sent;
+    return ret;
 }
 
 bool tcp_is_connected(void)

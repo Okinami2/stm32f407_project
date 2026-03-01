@@ -443,4 +443,4 @@ int max_app_init(void)
     LOG_I("MAX40109 Init Completed");
     return RT_EOK;
 }
-INIT_DEVICE_EXPORT(max_app_init);
+INIT_APP_EXPORT(max_app_init);

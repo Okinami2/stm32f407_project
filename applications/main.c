@@ -18,6 +18,14 @@
 #include "hardware/max40109_hal.h"
 #include "services/data_cache.h"
 
+
+
+#include <sys/socket.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <netdev.h>
+#include <errno.h>
+
 #define DBG_TAG "main"
 #define DBG_LVL DBG_LOG
 #include <rtdbg.h>
@@ -25,16 +33,19 @@
 
 int main(void)
 {
+    rt_thread_mdelay(100);
     int count = 1;
 
     if(adc_get_thread_start() != RT_EOK){
         rt_kprintf("fail start adc_get_thread\n");
     }
+
     /*
-    */
     if(adc_send_to_server_start() != RT_EOK){
         rt_kprintf("fail start adc_send_thread\n");
     }
+    */
+    //dump_cache_files();
 
     /* Test code for time display*/
     // struct timeval sys_time;
@@ -80,35 +91,35 @@ int main(void)
         rt_kprintf("current_pps_stats: %d, current_tick_per_sec = %d.%d \n",current_state,sec_int,sec_f);
         */
 
+        //dump_cache_files();
 
-        dump_cache_files();
 
         /* Test code for ADC value
-        double uncal_val = 0.0;
-        double cal_val = 0.0;
+        */
+        //double uncal_val = 0.0;
+        //double cal_val = 0.0;
         double ads_val = 0.0;
 
-        max40109_read_pressure(6, &uncal_val, 0);
-        max40109_read_pressure(6, &cal_val, 1);
+        //max40109_read_pressure(6, &uncal_val, 0);
+        //max40109_read_pressure(6, &cal_val, 1);
         extern double get_tmp_ch0_press(void);
         ads_val = get_tmp_ch0_press();
 
-        int a1 = (int)(uncal_val);
-        int a2 = (int)(cal_val);
+        //int a1 = (int)(uncal_val);
+        //int a2 = (int)(cal_val);
         int a3 = (int)(ads_val);
         int b1,b2,b3;
 
-        if(a1>0) b1 = (int)((uncal_val - a1) * 1000);
-        else b1 = (int)((a1 - uncal_val) * 1000);
-        if(a2>0) b2 = (int)((cal_val - a2) * 1000);
-        else b2 = (int)((a2 - cal_val) * 1000);
+        //if(a1>0) b1 = (int)((uncal_val - a1) * 1000);
+        //else b1 = (int)((a1 - uncal_val) * 1000);
+        //if(a2>0) b2 = (int)((cal_val - a2) * 1000);
+        //else b2 = (int)((a2 - cal_val) * 1000);
         if(a3>0) b3 = (int)((ads_val - a3) * 1000);
         else b3 = (int)((a3 - ads_val) * 1000);
-        rt_kprintf("ch6: %d.%03d, %d.%03d, %d.%03d\n", a1, b1, a2, b2, a3, b3);
+        //rt_kprintf("ch6: %d.%03d, %d.%03d, %d.%03d\n", a1, b1, a2, b2, a3, b3);
 
-        */
-        rt_thread_mdelay(5000);
-
+        rt_kprintf("ch1: %d.%03d\n", a3, b3);
+        rt_thread_mdelay(1000);
 
     }
     return RT_EOK;

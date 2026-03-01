@@ -55,7 +55,7 @@ extern rt_uint32_t g_sequence_id;
 
 /* 最大数据包大小 (用于缓冲区分配) */
 #define ADC_PACKET_SIZE     (BATCH_SIZE * 8 * sizeof(float) + sizeof(sys_calendar_time_t) + sizeof(rt_uint8_t) + 9)
-#define ADC_RESENT_PACKET_NUM   64
+#define ADC_RESENT_PACKET_NUM   16
 /**
  * @brief 计算 ADC 数据包的总长度
  * @return 数据包字节数

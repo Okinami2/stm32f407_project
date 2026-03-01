@@ -147,7 +147,7 @@ float ads131m08_convert_to_voltage_uv(rt_int32_t raw_value, rt_uint16_t gain)
             return NAN;
     }
 
-    float voltage_uv = ((float)raw_value / ADC_FULL_SCALE_CODE / 90 / 4) * fsr * 1e6f; /* 5 is the gain from max40109,fiexd for test, 4 is the out stage gain in max40109*/
+    float voltage_uv = ((float)raw_value / ADC_FULL_SCALE_CODE) * fsr * 1e6f; /* 5 is the gain from max40109,fiexd for test, 4 is the out stage gain in max40109*/
 
     return voltage_uv;
 }
