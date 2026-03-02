@@ -46,6 +46,7 @@
 
 #define GAIN2_ADDR              0x05
 
+#define CFG_ADDR                0x06
 
 /* HAL layer configuration */
 #define CLK_SEL_8_192_MHZ       1

@@ -255,6 +255,12 @@ rt_err_t ads131m08_init(void)
     if (adcRegisterWrite(GAIN2_ADDR, 0x0000, word_length) != RT_TRUE) {
         return ADC_ERR_SET_GAIN;
     }
+
+    /* enable global chop */
+    if (adcRegisterWrite(CFG_ADDR, 0x0700, word_length) != RT_TRUE) {
+        return -1;
+    }
+
     /* Clear reset bit, set DRDY low pulse mode */
     if (adcRegisterWrite(MODE_ADDR, 0X0115, word_length) != RT_TRUE) {
        return ADC_ERR_REG_WRITE_MODE;
