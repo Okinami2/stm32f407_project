@@ -190,10 +190,22 @@ void gnss_uart_resume(void)
 {
     if (serial_dev)
     {
-        rt_device_open(serial_dev, RT_DEVICE_FLAG_DMA_RX);
+        rt_device_open(serial_dev, RT_DEVICE_FLAG_DMA_RX| RT_DEVICE_FLAG_RDWR);
 
         rt_device_set_rx_indicate(serial_dev, uart_input_callback);
     }
+}
+
+int gnss_uart_send(const char *message)
+{
+
+    rt_size_t n = rt_device_write(serial_dev, 0, message, rt_strlen(message));
+    if (n != rt_strlen(message))
+    {
+        LOG_W("UART write not complete: %d", n);
+        return -1;
+    }
+    return 0;
 }
 
 
@@ -221,6 +233,7 @@ static void gnss_thread_entry(void *parameter)
                 }
                 if (ch == '\n') {
                     line_buffer[line_idx] = '\0';
+                    //rt_kprintf("%s \n",line_buffer);
                     if (rt_strstr(line_buffer, "RMC"))
                     {
                         time_t gps_utc = 0;
@@ -270,9 +283,10 @@ int gnss_service_init(void)
 
     rx_sem = rt_sem_create("gnss_sem", 0, RT_IPC_FLAG_FIFO);
 
-    rt_device_open(serial_dev, RT_DEVICE_FLAG_DMA_RX);
+    rt_device_open(serial_dev, RT_DEVICE_FLAG_DMA_RX|RT_DEVICE_FLAG_RDWR);
 
     rt_device_set_rx_indicate(serial_dev, uart_input_callback);
+
 
     rt_thread_t thread = rt_thread_create("gnss_rx",
                                           gnss_thread_entry,

@@ -28,7 +28,7 @@
 #define NTP_ITERATIONS      8
 #define NTP_INTERVAL_MS     100
 #define NTP_TIMEOUT_MS      2000
-#define DEFAULT_SYNC_INTERVAL_SECONDS 60*60
+#define DEFAULT_SYNC_INTERVAL_SECONDS 60*30
 
 typedef struct __attribute__((packed)) {
     uint8_t  li_vn_mode;
@@ -195,6 +195,11 @@ static void ntp_sync_thread_entry(void *parameter)
     rt_tick_t interval_ticks = RT_TICK_PER_SECOND * DEFAULT_SYNC_INTERVAL_SECONDS;
 
     rt_thread_mdelay(5000);
+
+    if (ntp_sync() == 0) {
+    } else {
+        rt_kprintf("ntp sync failed. please check the network.\n");
+    }
 
     while (1)
     {

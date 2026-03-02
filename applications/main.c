@@ -17,14 +17,8 @@
 #include "tasks/adc_send_thread.h"
 #include "hardware/max40109_hal.h"
 #include "services/data_cache.h"
+#include "services/time_service.h"
 
-
-
-#include <sys/socket.h>
-#include <netdb.h>
-#include <arpa/inet.h>
-#include <netdev.h>
-#include <errno.h>
 
 #define DBG_TAG "main"
 #define DBG_LVL DBG_LOG
@@ -40,6 +34,10 @@ int main(void)
         rt_kprintf("fail start adc_get_thread\n");
     }
 
+
+    //extern int gnss_uart_send(const char *message);
+
+
     /*
     if(adc_send_to_server_start() != RT_EOK){
         rt_kprintf("fail start adc_send_thread\n");
@@ -47,20 +45,25 @@ int main(void)
     */
     //dump_cache_files();
 
-    /* Test code for time display*/
+    /* Test code for time display
     // struct timeval sys_time;
-    // sys_calendar_time_t sys_cal;
+    sys_calendar_time_t sys_cal;
+    char buf[96];
+    */
     while (count++)
     {
+        //gnss_uart_send("$PMTK285,4,100*38\r\n");
         //ts_get_time(&sys_time);
         /*
         ts_get_calendar_time(&sys_cal);
-        rt_kprintf("cur_time: %04d-%02d-%02d %02d:%02d:%02d.%06lu UTC\n",
-                           sys_cal.year, sys_cal.month, sys_cal.day,
-                           sys_cal.hour, sys_cal.minute, sys_cal.second,
-                           sys_cal.microsecond);
-        */
+        rt_snprintf(buf, sizeof(buf),
+                        "cur_time: %04d-%02d-%02d %02d:%02d:%02d.%06lu UTC\r\n",
+                        sys_cal.year, sys_cal.month, sys_cal.day,
+                        sys_cal.hour, sys_cal.minute, sys_cal.second,
+                        sys_cal.microsecond);
+        rt_kprintf("%s",buf);
 
+        */
         /* Test code for reading MAX chip pressure
         int pressure = 0;
         max40109_read_pressure(0,&pressure);
@@ -95,10 +98,9 @@ int main(void)
 
 
         /* Test code for ADC value
-        */
         //double uncal_val = 0.0;
         //double cal_val = 0.0;
-        double ads_val = 0.0;
+        //double ads_val = 0.0;
 
         //max40109_read_pressure(6, &uncal_val, 0);
         //max40109_read_pressure(6, &cal_val, 1);
@@ -117,9 +119,9 @@ int main(void)
         if(a3>0) b3 = (int)((ads_val - a3) * 1000);
         else b3 = (int)((a3 - ads_val) * 1000);
         //rt_kprintf("ch6: %d.%03d, %d.%03d, %d.%03d\n", a1, b1, a2, b2, a3, b3);
-
         rt_kprintf("ch1: %d.%03d\n", a3, b3);
-        rt_thread_mdelay(1000);
+        */
+        rt_thread_mdelay(5000);
 
     }
     return RT_EOK;

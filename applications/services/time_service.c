@@ -27,6 +27,7 @@ typedef struct {
 
 static rt_timer_t s_pps_timeout_timer = RT_NULL;
 static rt_uint8_t acquiring_pps_cnt = 0;
+static rt_bool_t init_pps = 1;
 
 static TimeEngine_t engine = {
         .system_base_sec = 0,
@@ -156,6 +157,11 @@ static void _pps_timer_deinit(void)
 
 void ts_pps_irq_handler(void *args)
 {
+    if(init_pps){
+        init_pps = 0;
+        return;
+    }
+
     uint32_t now = TS_HW_TIMER->CNT;
 
     uint32_t ovf_now, cnt_now;
@@ -292,8 +298,8 @@ void ts_correct_time_by_ntp_offset_us(int64_t offset_us)
     Timestamp_t now;
     ts_get_time(&now);
 
-    if(engine.state != PPS_STATE_INIT || engine.state != PPS_STATE_FREERUN){
-        rt_kprintf("the sys time is high precision,ntp diff=%d us",offset_us);
+    if(engine.state != PPS_STATE_INIT && engine.state != PPS_STATE_FREERUN){
+        rt_kprintf("current system time status is %d,ignore ntp correct, ntp diff=%d us",engine.state,offset_us);
         return;
     }
 
@@ -355,6 +361,7 @@ int time_service_init(void) {
     rt_thread_mdelay(100);
     engine.state = PPS_STATE_INIT;
     engine.last_pps_tick = 0;
+    init_pps = 1;
 
     return 0;
 }
