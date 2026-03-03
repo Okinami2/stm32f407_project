@@ -194,7 +194,7 @@ static void ntp_sync_thread_entry(void *parameter)
     rt_tick_t last_update_tick = rt_tick_get();
     rt_tick_t interval_ticks = RT_TICK_PER_SECOND * DEFAULT_SYNC_INTERVAL_SECONDS;
 
-    rt_thread_mdelay(5000);
+    rt_thread_mdelay(30000);
 
     if (ntp_sync() == 0) {
     } else {

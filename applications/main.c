@@ -19,6 +19,7 @@
 #include "services/data_cache.h"
 #include "services/time_service.h"
 
+#include "tasks/adc_get_test.h"
 
 #define DBG_TAG "main"
 #define DBG_LVL DBG_LOG
@@ -30,10 +31,14 @@ int main(void)
     rt_thread_mdelay(100);
     int count = 1;
 
+    if(adc_get_test_start() != RT_EOK){
+        rt_kprintf("fail start adc_get_test\n");
+    }
+    /*
     if(adc_get_thread_start() != RT_EOK){
         rt_kprintf("fail start adc_get_thread\n");
     }
-
+     */
 
     //extern int gnss_uart_send(const char *message);
 
