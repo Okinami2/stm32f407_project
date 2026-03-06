@@ -5,6 +5,7 @@
 
 #include "../services/time_service.h"
 #include "../hardware/max40109_hal.h"
+#include "../hardware/ads131m08_hal.h"
 
 #include <stdlib.h>
 #if defined(RT_USING_FINSH) || defined(RT_USING_MSH)
@@ -390,6 +391,19 @@ static rt_err_t read_max_chip(const char* id_str, const char* addr_str,rt_uint8_
     return res;
 }
 
+static rt_err_t write_ads_chip(const char* addr_str, const char* val_str)
+{
+    rt_uint8_t reg_addr;
+    rt_uint16_t reg_val;
+    rt_err_t res = RT_EOK;
+    reg_addr = (rt_uint8_t)strtol(addr_str, NULL, 0);
+    reg_val = (rt_uint16_t)strtol(val_str, NULL, 0);
+    if(adcRegisterWrite(reg_addr,reg_val,24) != RT_TRUE){
+        rt_kprintf("write ads 0x%X to 0x%X fail!\n",reg_addr,reg_val);
+        return -RT_ERROR;
+    }
+    return RT_EOK;
+}
 
 /**
  * @brief Entry point for configuration thread (currently unused)
@@ -486,6 +500,20 @@ static int finsh_cmd_config(int argc, char **argv)
             if(read_max_chip(argv[2], argv[3],2) != RT_EOK){
                 return -RT_ERROR;
             }
+        }
+
+        return RT_EOK;
+    }
+    else if(strcmp(argv[1], "write_ads") == 0){
+        if (argc != 4)
+        {
+            rt_kprintf("Usage: config write_ads_chip <reg> <value>\n");
+            rt_kprintf("E.g. : config write_ads_chip 0x0E 0x0200\n");
+            return -RT_ERROR;
+        }
+
+        if(write_ads_chip(argv[2], argv[3]) != RT_EOK){
+            return -RT_ERROR;
         }
 
         return RT_EOK;

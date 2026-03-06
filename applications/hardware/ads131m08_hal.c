@@ -258,7 +258,7 @@ rt_err_t ads131m08_init(void)
 
     /* enable global chop */
     if (adcRegisterWrite(CFG_ADDR, 0x0700, word_length) != RT_TRUE) {
-        return -1;
+        return -RT_ERROR;
     }
 
     /* Clear reset bit, set DRDY low pulse mode */

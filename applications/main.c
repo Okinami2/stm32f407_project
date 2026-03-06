@@ -31,14 +31,14 @@ int main(void)
     rt_thread_mdelay(100);
     int count = 1;
 
+    /*
     if(adc_get_test_start() != RT_EOK){
         rt_kprintf("fail start adc_get_test\n");
     }
-    /*
+     */
     if(adc_get_thread_start() != RT_EOK){
         rt_kprintf("fail start adc_get_thread\n");
     }
-     */
 
     //extern int gnss_uart_send(const char *message);
 
@@ -103,9 +103,10 @@ int main(void)
 
 
         /* Test code for ADC value
+        */
         //double uncal_val = 0.0;
         //double cal_val = 0.0;
-        //double ads_val = 0.0;
+        double ads_val = 0.0;
 
         //max40109_read_pressure(6, &uncal_val, 0);
         //max40109_read_pressure(6, &cal_val, 1);
@@ -124,9 +125,8 @@ int main(void)
         if(a3>0) b3 = (int)((ads_val - a3) * 1000);
         else b3 = (int)((a3 - ads_val) * 1000);
         //rt_kprintf("ch6: %d.%03d, %d.%03d, %d.%03d\n", a1, b1, a2, b2, a3, b3);
-        rt_kprintf("ch1: %d.%03d\n", a3, b3);
-        */
-        rt_thread_mdelay(5000);
+        rt_kprintf("ch6: %d.%03d\n", a3, b3);
+        rt_thread_mdelay(500);
 
     }
     return RT_EOK;
