@@ -31,14 +31,14 @@ int main(void)
     rt_thread_mdelay(100);
     int count = 1;
 
-    /*
     if(adc_get_test_start() != RT_EOK){
         rt_kprintf("fail start adc_get_test\n");
     }
-     */
+    /*
     if(adc_get_thread_start() != RT_EOK){
         rt_kprintf("fail start adc_get_thread\n");
     }
+     */
 
     //extern int gnss_uart_send(const char *message);
 
@@ -75,7 +75,7 @@ int main(void)
         rt_kprintf("ch0: %d \n",pressure);
         */
 
-        /* Test code for GNSS
+        /* Test code for GNSS*/
         int quality = gnss_get_fix_quality();
         int sats    = gnss_get_satellites_used();
         float hdop  = gnss_get_hdop();
@@ -92,18 +92,27 @@ int main(void)
         {
             rt_kprintf("[GNSS] No fix (Fix Quality = 0)\n");
         }
+
+        extern rt_uint8_t time_ready;
+        extern Timestamp_t current;
+        if(time_ready){
+
+            rt_kprintf("current time: %d s %d usec \n",current.sec,current.usec);
+            time_ready = 0;
+
+        }
+        /*
         PPS_State_t current_state = get_system_state();
         double cur_tick_per_sec = get_ticks_per_sec();
         uint32_t sec_int = (uint32_t)cur_tick_per_sec;
         uint32_t sec_f = (uint32_t)(cur_tick_per_sec - sec_int) * 100000;
         rt_kprintf("current_pps_stats: %d, current_tick_per_sec = %d.%d \n",current_state,sec_int,sec_f);
-        */
+    */
 
         //dump_cache_files();
 
 
         /* Test code for ADC value
-        */
         //double uncal_val = 0.0;
         //double cal_val = 0.0;
         double ads_val = 0.0;
@@ -126,7 +135,8 @@ int main(void)
         else b3 = (int)((a3 - ads_val) * 1000);
         //rt_kprintf("ch6: %d.%03d, %d.%03d, %d.%03d\n", a1, b1, a2, b2, a3, b3);
         rt_kprintf("ch6: %d.%03d\n", a3, b3);
-        rt_thread_mdelay(500);
+        */
+        rt_thread_mdelay(10000);
 
     }
     return RT_EOK;

@@ -14,6 +14,7 @@
 #include "drv_soft_i2c.h"
 #include <rtthread.h>
 #include <rtdevice.h>
+#include "../services/time_service.h"
 
 #define MAX40109_I2C_ADDR    0x4D
 #define I2C_BUS_NAME         "i2c1"
@@ -60,4 +61,5 @@ int max_app_init(void);
 rt_err_t global_max40109_write_reg(rt_uint8_t chip_idx, rt_uint8_t reg, rt_uint16_t val, rt_uint8_t len);
 rt_err_t global_max40109_read_reg(rt_uint8_t chip_idx, rt_uint8_t reg, rt_uint16_t *val, rt_uint8_t len);
 rt_err_t max40109_read_pressure(rt_uint8_t chip_idx, double *pressure, uint8_t is_calibrated);
+rt_bool_t ads131m08_get_drdy_timestamp(Timestamp_t *ts);
 #endif/* APPLICATIONS_MAX40109_HAL_H_ */

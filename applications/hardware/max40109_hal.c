@@ -406,8 +406,10 @@ int max_app_init(void)
         /* Enable interrupts (default disables temp/pressure ready) */
         res = max40109_write_u16(i, MAX40109_REG_INTERRUPT_ENABLE, 0xFF);
 
-        /* Set sample rate to 2ksps */
-        res = max40109_write_u8(i, MAX40109_REG_ADC_SAMPLE_RATE, 0x2);
+        /* Set sample rate to 16ksps */
+        res = max40109_write_u8(i, MAX40109_REG_ADC_SAMPLE_RATE, 0x8);
+        /* Set sample rate to 2ksps
+        res = max40109_write_u8(i, MAX40109_REG_ADC_SAMPLE_RATE, 0x2);*/
 
         /* Set analog output stage: absolute voltage, internal resistor */
         res = max40109_write_u8(i, MAX40109_REG_ANALOG_OUTPUT_STAGE, 0x8);

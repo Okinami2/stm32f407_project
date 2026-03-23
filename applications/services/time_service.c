@@ -154,7 +154,9 @@ static void _pps_timer_deinit(void)
 }
 
 
-
+rt_uint32_t pps_cnt = 0;
+rt_uint8_t time_ready = 0;
+Timestamp_t current = {0};
 void ts_pps_irq_handler(void *args)
 {
     if(init_pps){
@@ -169,6 +171,14 @@ void ts_pps_irq_handler(void *args)
 
     uint64_t last_ext = ((uint64_t)engine.last_pps_ovf << 32) | engine.last_pps_tick;
     uint64_t delta_tick = now_ext - last_ext;
+
+
+//    for time syn test
+    pps_cnt += 1;
+    if(pps_cnt % 60 == 0){
+        ts_get_time(&current);
+        time_ready = 1;
+    }
 
     /* 判断PPS脉冲是否有效（间隔在标称值±10%内） */
     uint32_t nominal = (uint32_t)TS_TICKS_PER_SEC_NOMINAL;
@@ -230,28 +240,34 @@ void ts_pps_irq_handler(void *args)
 
 void ts_get_time(Timestamp_t *ts)
 {
+    uint32_t last_pps_ovf;
+    uint32_t last_pps_tick;
+    uint32_t base_sec;
+    uint64_t now_ext;
+    double ticks_per_sec;
+
     rt_base_t level = rt_hw_interrupt_disable();
 
     uint32_t ovf_now, cnt_now;
-    uint64_t now_ext = _read_tim2_ext_tick(&ovf_now, &cnt_now);
+    now_ext = _read_tim2_ext_tick(&ovf_now, &cnt_now);
 
-    uint64_t last_ext = ((uint64_t)engine.last_pps_ovf << 32) | engine.last_pps_tick;
+    last_pps_ovf  = engine.last_pps_ovf;
+    last_pps_tick = engine.last_pps_tick;
+    base_sec      = engine.system_base_sec;
+    ticks_per_sec = engine.ticks_per_sec;
+
+    rt_hw_interrupt_enable(level);
+
+    uint64_t last_ext = ((uint64_t)last_pps_ovf << 32) | last_pps_tick;
     uint64_t elapsed_ticks = now_ext - last_ext;
 
-    double elapsed_s = (double)elapsed_ticks / engine.ticks_per_sec;
+    double elapsed_s = (double)elapsed_ticks / ticks_per_sec;
     uint32_t sec_add = (uint32_t)elapsed_s;
     uint32_t usec    = (uint32_t)((elapsed_s - (double)sec_add) * 1000000.0 + 0.5);
 
-    ts->sec  = engine.system_base_sec + sec_add;
-    if(usec >= 1000000){
-        ts->sec += 1;
-        ts->usec = usec - 1000000;
-    }
-    else{
-        ts->usec = usec;
-    }
-
-    rt_hw_interrupt_enable(level);
+    ts->sec = base_sec + sec_add;
+    ts->usec = (usec >= 1000000) ? (usec - 1000000) : usec;
+    if (usec >= 1000000) ts->sec += 1;
 }
 
 void ts_get_calendar_time(sys_calendar_time_t *cal) {
