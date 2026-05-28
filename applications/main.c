@@ -31,24 +31,24 @@ int main(void)
     rt_thread_mdelay(100);
     int count = 1;
 
+    /* for data syn test
     if(adc_get_test_start() != RT_EOK){
         rt_kprintf("fail start adc_get_test\n");
     }
-    /*
+     */
     if(adc_get_thread_start() != RT_EOK){
         rt_kprintf("fail start adc_get_thread\n");
     }
-     */
 
     //extern int gnss_uart_send(const char *message);
 
 
     /*
+    */
     if(adc_send_to_server_start() != RT_EOK){
         rt_kprintf("fail start adc_send_thread\n");
     }
-    */
-    //dump_cache_files();
+    dump_cache_files();
 
     /* Test code for time display
     // struct timeval sys_time;
@@ -82,7 +82,7 @@ int main(void)
 
         if (quality >= 1)
         {
-            rt_kprintf("[GNSS] Located | Sats: %d | HDOP: %.2f (", sats, hdop);
+            rt_kprintf("[GNSS] Located | Sats: %d | HDOP: %d (", sats, (int)hdop);
             if (hdop < 1.5f)      rt_kprintf("Excellent)\n");
             else if (hdop < 2.0f) rt_kprintf("Good)\n");
             else if (hdop < 4.0f) rt_kprintf("Fair)\n");
@@ -109,7 +109,7 @@ int main(void)
         rt_kprintf("current_pps_stats: %d, current_tick_per_sec = %d.%d \n",current_state,sec_int,sec_f);
     */
 
-        //dump_cache_files();
+        dump_cache_files();
 
 
         /* Test code for ADC value
