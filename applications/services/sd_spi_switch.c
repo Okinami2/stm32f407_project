@@ -97,6 +97,18 @@ void ts_spi_bus_claim(void) {
     rt_hw_interrupt_enable(level);
 }
 
+void ts_spi_bus_set_gnss_mode(void)
+{
+    _ensure_mux_mutex_inited();
+
+    rt_base_t level = rt_hw_interrupt_disable();
+    _set_mux_mode(MODE_SAFE_HIZ);
+    _set_mux_mode(MODE_GNSS);
+    rt_hw_interrupt_enable(level);
+
+    gnss_uart_resume();
+}
+
 void ts_spi_bus_release(void) {
     _ensure_mux_mutex_inited();
 

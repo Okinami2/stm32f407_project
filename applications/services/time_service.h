@@ -16,7 +16,7 @@
 #define TS_TICKS_PER_SEC_NOMINAL 1000000.0
 
 #define TS_NTP_SYNC_THRESHOLD_US  100000
-#define PPS_VALID_TOLERANCE_US    100
+#define PPS_VALID_TOLERANCE_PERSENT    10 /* the valid window pps arrived after last one */
 
 #define PPS_ACQ_VALID_COUNT              5       /* Required consecutive valid PPS for LOCKED */
 #define PPS_LOCKED_TIMEOUT           30      /* LOCKED -> HOLDOVER timeout (seconds) */

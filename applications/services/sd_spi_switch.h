@@ -13,5 +13,6 @@
 
 void ts_spi_bus_claim(void);
 void ts_spi_bus_release(void);
+void ts_spi_bus_set_gnss_mode(void);
 
 #endif /* APPLICATIONS_SD_SPI_SWITCH_H_ */

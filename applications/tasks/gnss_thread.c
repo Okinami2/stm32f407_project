@@ -144,6 +144,27 @@ static int parse_rmc_time(const char *nmea_line, time_t *out_timestamp)
     return 0;
 }
 
+static int nmea_checksum_ok(const char *s)
+{
+    if (!s || s[0] != '$') return 0;
+
+    uint8_t sum = 0;
+    const char *p = s + 1;
+
+    while (*p && *p != '*') {
+        sum ^= (uint8_t)(*p++);
+    }
+
+    if (*p != '*') return 0;
+    if (!isxdigit((unsigned char)p[1]) || !isxdigit((unsigned char)p[2])) return 0;
+
+    int got = 0;
+    sscanf(p + 1, "%2x", &got);
+
+    return sum == (uint8_t)got;
+}
+
+
 // GGA format: $GNGGA,UTC,Latitude,N/S,Longitude,E/W,Position Fix Indicator,Satellites Used,HDOP,MSL Altitude,AltUnit,GeoSep,GeoSepUnit...
 // Field index:  0   1   2        3   4         5   6                      7               8    9   10       11      12
 static int parse_gga_sat_used(const char *nmea_line, int *fix_quality, int *sat_used, float *hdop)
@@ -236,6 +257,11 @@ static void gnss_thread_entry(void *parameter)
                     //rt_kprintf("%s \n",line_buffer);
                     if (rt_strstr(line_buffer, "RMC"))
                     {
+                        if (!nmea_checksum_ok(line_buffer)) {
+                            line_idx = 0;
+                            continue;
+                        }
+
                         time_t gps_utc = 0;
 
                         if (parse_rmc_time(line_buffer, &gps_utc) == 0)
@@ -272,7 +298,7 @@ int gnss_service_init(void)
     rt_pin_write(BSP_GNSSPWR_EN_PIN,PIN_HIGH);
     rt_pin_write(BSP_GNSS_SW_PIN,PIN_HIGH);
 
-    ts_spi_bus_release();
+    ts_spi_bus_set_gnss_mode();
 
     serial_dev = rt_device_find(GNSS_UART_NAME);
     if (!serial_dev)

@@ -180,10 +180,10 @@ void ts_pps_irq_handler(void *args)
         time_ready = 1;
     }
 
-    /* 判断PPS脉冲是否有效（间隔在标称值±10%内） */
     uint32_t nominal = (uint32_t)TS_TICKS_PER_SEC_NOMINAL;
-    int is_valid_pulse = (delta_tick > (uint32_t)(nominal * 0.9)) &&
-                         (delta_tick < (uint32_t)(nominal * 1.1));
+    uint32_t tol = TS_TICKS_PER_SEC_NOMINAL * 10 / 100;
+    int is_valid_pulse = (delta_tick > (uint32_t)(nominal - tol)) &&
+                         (delta_tick < (uint32_t)(nominal + tol));
 
     engine.last_pps_tick = now;
     engine.last_pps_ovf = ovf_now;
@@ -292,9 +292,8 @@ void ts_get_calendar_time(sys_calendar_time_t *cal) {
 /* NMEA time correction */
 void ts_correct_time_by_nmea(time_t utc_sec) {
     uint32_t now = TS_HW_TIMER->CNT;
-
-    if (now - engine.last_pps_tick > 1000000 * 1.2) {
-        rt_kprintf("[TS] The NMEA timestamp seems outdated: %d\n", utc_sec);
+    if (now - engine.last_pps_tick > 1000000 * 0.6) {
+        rt_kprintf("[TS] NMEA timestamp outdated: %ld\n", (long)utc_sec);
         return;
     }
 
@@ -302,7 +301,7 @@ void ts_correct_time_by_nmea(time_t utc_sec) {
 
     if (engine.system_base_sec != utc_sec) {
         engine.system_base_sec = utc_sec;
-        rt_kprintf("[TS] NMEA Corrected Base Sec: %d\n", utc_sec);
+        rt_kprintf("[TS] NMEA Corrected Base Sec: %ld\n", utc_sec);
     }
 
     rt_hw_interrupt_enable(level);
@@ -315,7 +314,7 @@ void ts_correct_time_by_ntp_offset_us(int64_t offset_us)
     ts_get_time(&now);
 
     if(engine.state != PPS_STATE_INIT && engine.state != PPS_STATE_FREERUN){
-        rt_kprintf("current system time status is %d,ignore ntp correct, ntp diff=%d us",engine.state,offset_us);
+        rt_kprintf("current system time status is %d,ignore ntp correct, ntp diff=%lld us",engine.state,(long long)offset_us);
         return;
     }
 

@@ -52,14 +52,15 @@ int main(void)
 
     /* Test code for time display
     // struct timeval sys_time;
+    */
     sys_calendar_time_t sys_cal;
     char buf[96];
-    */
     while (count++)
     {
         //gnss_uart_send("$PMTK285,4,100*38\r\n");
         //ts_get_time(&sys_time);
         /*
+        */
         ts_get_calendar_time(&sys_cal);
         rt_snprintf(buf, sizeof(buf),
                         "cur_time: %04d-%02d-%02d %02d:%02d:%02d.%06lu UTC\r\n",
@@ -68,7 +69,6 @@ int main(void)
                         sys_cal.microsecond);
         rt_kprintf("%s",buf);
 
-        */
         /* Test code for reading MAX chip pressure
         int pressure = 0;
         max40109_read_pressure(0,&pressure);
